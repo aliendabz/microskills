@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/services/api';
-import { authManager, getAuthToken, getCurrentUser, logout as authLogout } from '@/lib/auth';
+import { supabaseAuthManager } from '@/lib/supabaseAuth';
 import { handleError } from '@/utils/errorHandling';
 import type { 
   LoginCredentials, 
@@ -45,34 +45,33 @@ export function useAuth(): UseAuthReturn {
   const [error, setError] = useState<string | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
 
-  // Get current user query
-  const {
-    data: user,
-    isLoading: isLoadingUser,
-    error: userError,
-    refetch: refetchUser
-  } = useQuery({
-    queryKey: AUTH_QUERY_KEYS.user,
-    queryFn: async (): Promise<User> => {
-      const token = getAuthToken();
-      if (!token) {
-        throw new Error('No authentication token');
+  // Get current user from Supabase auth manager
+  const [user, setUser] = useState<User | null>(null);
+  const [isLoadingUser, setIsLoadingUser] = useState(true);
+  const [userError, setUserError] = useState<Error | null>(null);
+
+  // Subscribe to Supabase auth state changes
+  useEffect(() => {
+    const unsubscribe = supabaseAuthManager.subscribe((state) => {
+      setUser(state.user);
+      setIsLoadingUser(state.loading);
+      if (state.error) {
+        setUserError(new Error(state.error));
+      } else {
+        setUserError(null);
       }
-      
-      const response = await apiClient.getUserProfile();
-      return response.data;
-    },
-    enabled: !!getAuthToken(),
-    retry: (failureCount, error) => {
-      // Don't retry on authentication errors
-      if (error.message.includes('401') || error.message.includes('Unauthorized')) {
-        return false;
-      }
-      return failureCount < 3;
-    },
-    staleTime: 5 * 60 * 1000, // 5 minutes
-    gcTime: 10 * 60 * 1000, // 10 minutes
-  });
+    });
+
+    // Set initial state
+    const initialState = supabaseAuthManager.getState();
+    setUser(initialState.user);
+    setIsLoadingUser(initialState.loading);
+    if (initialState.error) {
+      setUserError(new Error(initialState.error));
+    }
+
+    return unsubscribe;
+  }, []);
 
   // Get user preferences query
   const {
@@ -90,18 +89,13 @@ export function useAuth(): UseAuthReturn {
     gcTime: 30 * 60 * 1000, // 30 minutes
   });
 
-  // Login mutation
+  // Login mutation using Supabase
   const loginMutation = useMutation({
-    mutationFn: async (credentials: LoginCredentials): Promise<LoginResponse> => {
-      const response = await apiClient.login(credentials);
-      return response.data;
+    mutationFn: async (credentials: LoginCredentials): Promise<void> => {
+      await supabaseAuthManager.signInWithEmail(credentials);
     },
-    onSuccess: async (data) => {
-      // Store authentication data
-      authManager.handleLoginResponse(data);
-      
+    onSuccess: async () => {
       // Invalidate and refetch user data
-      await queryClient.invalidateQueries({ queryKey: AUTH_QUERY_KEYS.user });
       await queryClient.invalidateQueries({ queryKey: AUTH_QUERY_KEYS.preferences });
       
       // Clear any previous errors
@@ -109,7 +103,8 @@ export function useAuth(): UseAuthReturn {
       
       // Track login event
       if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('auth:login', { detail: { user: data.user } }));
+        const currentUser = supabaseAuthManager.getCurrentUser();
+        window.dispatchEvent(new CustomEvent('auth:login', { detail: { user: currentUser } }));
       }
     },
     onError: (error: any) => {
@@ -119,20 +114,12 @@ export function useAuth(): UseAuthReturn {
     }
   });
 
-  // Logout mutation
+  // Logout mutation using Supabase
   const logoutMutation = useMutation({
     mutationFn: async (): Promise<void> => {
-      try {
-        await apiClient.logout();
-      } catch (error) {
-        // Continue with logout even if API call fails
-        console.warn('Logout API call failed:', error);
-      }
+      await supabaseAuthManager.signOut();
     },
     onSuccess: () => {
-      // Clear authentication data
-      authLogout();
-      
       // Clear all queries
       queryClient.clear();
       
@@ -146,30 +133,19 @@ export function useAuth(): UseAuthReturn {
     },
     onError: (error: any) => {
       // Force logout even if API call fails
-      authLogout();
       queryClient.clear();
       setError(null);
       handleError(error, { action: 'logout' });
     }
   });
 
-  // Refresh token mutation
+  // Refresh token mutation using Supabase
   const refreshTokenMutation = useMutation({
-    mutationFn: async (): Promise<RefreshTokenResponse> => {
-      const response = await apiClient.refreshToken();
-      return response.data;
+    mutationFn: async (): Promise<void> => {
+      await supabaseAuthManager.refreshSession();
     },
-    onSuccess: (data) => {
-      // Update token data
-      authManager.setTokenData({
-        token: data.token,
-        refreshToken: data.refreshToken,
-        expiresAt: data.expiresAt,
-        userId: getCurrentUser()?.id || '',
-      });
-      
+    onSuccess: () => {
       // Invalidate queries to refetch with new token
-      queryClient.invalidateQueries({ queryKey: AUTH_QUERY_KEYS.user });
       queryClient.invalidateQueries({ queryKey: AUTH_QUERY_KEYS.preferences });
     },
     onError: (error: any) => {
@@ -179,18 +155,14 @@ export function useAuth(): UseAuthReturn {
     }
   });
 
-  // Update user mutation
+  // Update user mutation using Supabase
   const updateUserMutation = useMutation({
-    mutationFn: async (userData: Partial<User>): Promise<User> => {
-      const response = await apiClient.updateUserProfile(userData);
-      return response.data;
+    mutationFn: async (userData: Partial<User>): Promise<void> => {
+      await supabaseAuthManager.updateProfile(userData);
     },
-    onSuccess: (updatedUser) => {
-      // Update user in cache
-      queryClient.setQueryData(AUTH_QUERY_KEYS.user, updatedUser);
-      
-      // Update user in auth manager
-      authManager.updateUser(updatedUser);
+    onSuccess: () => {
+      // User is automatically updated in Supabase auth manager
+      // No need to manually update cache
     },
     onError: (error: any) => {
       setError(error.message || 'Failed to update user profile');
@@ -225,17 +197,20 @@ export function useAuth(): UseAuthReturn {
   useEffect(() => {
     const initializeAuth = async () => {
       try {
-        const token = getAuthToken();
-        const currentUser = getCurrentUser();
-        
-        if (token && currentUser) {
-          // Check if token needs refresh
-          if (authManager.shouldRefreshToken()) {
-            await refreshTokenMutation.mutateAsync();
-          }
+        // Supabase auth manager handles initialization automatically
+        // Just wait for it to be ready
+        const state = supabaseAuthManager.getState();
+        if (state.isInitialized) {
+          setIsInitialized(true);
+        } else {
+          // Wait for initialization to complete
+          const unsubscribe = supabaseAuthManager.subscribe((state) => {
+            if (state.isInitialized) {
+              setIsInitialized(true);
+              unsubscribe();
+            }
+          });
         }
-        
-        setIsInitialized(true);
       } catch (error) {
         console.error('Failed to initialize auth:', error);
         setIsInitialized(true);
@@ -258,19 +233,8 @@ export function useAuth(): UseAuthReturn {
     }
   }, [userError]);
 
-  // Set up token refresh listener
-  useEffect(() => {
-    const handleTokenRefresh = () => {
-      queryClient.invalidateQueries({ queryKey: AUTH_QUERY_KEYS.user });
-      queryClient.invalidateQueries({ queryKey: AUTH_QUERY_KEYS.preferences });
-    };
-
-    authManager.onTokenRefresh(handleTokenRefresh);
-    
-    return () => {
-      authManager.offTokenRefresh(handleTokenRefresh);
-    };
-  }, [queryClient]);
+  // Supabase handles token refresh automatically
+  // No need for manual token refresh listeners
 
   // Authentication actions
   const login = useCallback(async (credentials: LoginCredentials): Promise<void> => {
@@ -298,7 +262,7 @@ export function useAuth(): UseAuthReturn {
   }, []);
 
   // Determine authentication state
-  const isAuthenticated = !!user && !!getAuthToken();
+  const isAuthenticated = supabaseAuthManager.isAuthenticated();
   const isLoading = isLoadingUser || isLoadingPreferences || 
                    loginMutation.isPending || 
                    logoutMutation.isPending || 

@@ -1,7 +1,15 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useLazyQuery, useMutation as useApolloMutation } from '@apollo/client';
 import { useAuth } from './useAuth';
 import { apiClient } from '@/services/api';
+import { 
+  GET_DAILY_LESSON, 
+  GET_USER_PROGRESS, 
+  SUBMIT_QUIZ, 
+  SWITCH_TONE, 
+  MARK_LESSON_COMPLETE 
+} from '@/lib/graphql';
 import { handleError } from '@/utils/errorHandling';
 import { useSpacedRepetition } from './useSpacedRepetition';
 import type { 
@@ -51,70 +59,44 @@ export function useLessons(): UseLessonsReturn {
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isToneSwitching, setIsToneSwitching] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [streamedContent, setStreamedContent] = useState<string>('');
+  const eventSourceRef = useRef<EventSource | null>(null);
   
   const { updateSpacedRepetition, getNextReview } = useSpacedRepetition();
 
-  // Get daily lesson query
-  const {
-    data: currentLesson,
-    isLoading: isLoadingLesson,
+  // GraphQL queries
+  const [getDailyLessonQuery, { 
+    data: dailyLessonData, 
+    loading: isLoadingLesson, 
     error: lessonError,
-    refetch: refetchDailyLesson
-  } = useQuery({
-    queryKey: LESSON_QUERY_KEYS.dailyLesson,
-    queryFn: async (): Promise<Lesson> => {
-      const response = await apiClient.getDailyLesson();
-      return response.data;
-    },
-    enabled: isAuthenticated,
-    staleTime: 5 * 60 * 1000, // 5 minutes
-    gcTime: 10 * 60 * 1000, // 10 minutes
-    retry: (failureCount, error) => {
-      // Don't retry on authentication errors
-      if (error.message.includes('401') || error.message.includes('Unauthorized')) {
-        return false;
-      }
-      return failureCount < 3;
-    },
+    refetch: refetchDailyLesson 
+  }] = useLazyQuery(GET_DAILY_LESSON, {
+    fetchPolicy: 'cache-and-network',
+    errorPolicy: 'all',
   });
 
-  // Get user progress query
-  const {
-    data: lessonProgress,
-    isLoading: isLoadingProgress,
-    refetch: refetchProgress
-  } = useQuery({
-    queryKey: LESSON_QUERY_KEYS.lessonProgress,
-    queryFn: async (): Promise<UserProgress> => {
-      const response = await apiClient.getUserProgress();
-      return response.data;
-    },
-    enabled: isAuthenticated,
-    staleTime: 2 * 60 * 1000, // 2 minutes
-    gcTime: 5 * 60 * 1000, // 5 minutes
+  const [getUserProgressQuery, { 
+    data: progressData, 
+    loading: isLoadingProgress,
+    refetch: refetchProgress 
+  }] = useLazyQuery(GET_USER_PROGRESS, {
+    fetchPolicy: 'cache-and-network',
+    errorPolicy: 'all',
   });
 
-  // Submit quiz mutation
-  const submitQuizMutation = useMutation({
-    mutationFn: async (submission: QuizSubmission): Promise<QuizResult> => {
-      setIsSubmitting(true);
-      try {
-        const response = await apiClient.submitQuiz(submission);
-        return response.data;
-      } finally {
-        setIsSubmitting(false);
-      }
-    },
-    onSuccess: async (result, submission) => {
+  // GraphQL mutations
+  const [submitQuizMutation] = useApolloMutation(SUBMIT_QUIZ, {
+    onCompleted: async (data, { variables }) => {
       // Update lesson progress
       await queryClient.invalidateQueries({ queryKey: LESSON_QUERY_KEYS.lessonProgress });
       await queryClient.invalidateQueries({ queryKey: LESSON_QUERY_KEYS.userProgress });
       
       // Update spaced repetition if quiz was passed
-      if (result.passed && submission.quizId) {
+      if (data.submitQuiz.passed && variables.input.quizId) {
         await updateSpacedRepetition({
-          lessonId: submission.quizId,
-          quality: result.percentage >= 80 ? 5 : result.percentage >= 60 ? 4 : 3,
+          lessonId: variables.input.quizId,
+          quality: data.submitQuiz.percentage >= 80 ? 5 : data.submitQuiz.percentage >= 60 ? 4 : 3,
         });
       }
       
@@ -125,9 +107,9 @@ export function useLessons(): UseLessonsReturn {
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('lesson:quiz-completed', { 
           detail: { 
-            lessonId: submission.quizId,
-            score: result.percentage,
-            passed: result.passed 
+            lessonId: variables.input.quizId,
+            score: data.submitQuiz.percentage,
+            passed: data.submitQuiz.passed 
           } 
         }));
       }
@@ -139,24 +121,8 @@ export function useLessons(): UseLessonsReturn {
     }
   });
 
-  // Switch tone mutation
-  const switchToneMutation = useMutation({
-    mutationFn: async ({ tone, lessonId }: { tone: string; lessonId?: string }): Promise<ToneSwitchResponse> => {
-      setIsToneSwitching(true);
-      try {
-        const request: ToneSwitchRequest = {
-          tone,
-          lessonId: lessonId || currentLesson?.id,
-          sessionId: sessionStorage.getItem('session_id') || undefined,
-        };
-        
-        const response = await apiClient.switchTone(request);
-        return response.data;
-      } finally {
-        setIsToneSwitching(false);
-      }
-    },
-    onSuccess: (result) => {
+  const [switchToneMutation] = useApolloMutation(SWITCH_TONE, {
+    onCompleted: (data) => {
       // Invalidate lesson data to refetch with new tone
       queryClient.invalidateQueries({ queryKey: LESSON_QUERY_KEYS.dailyLesson });
       
@@ -167,8 +133,8 @@ export function useLessons(): UseLessonsReturn {
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('lesson:tone-switched', { 
           detail: { 
-            newTone: result.newTone,
-            lessonId: currentLesson?.id 
+            newTone: data.switchTone.newTone,
+            lessonId: dailyLessonData?.getDailyLesson?.id 
           } 
         }));
       }
@@ -180,23 +146,17 @@ export function useLessons(): UseLessonsReturn {
     }
   });
 
-  // Mark lesson complete mutation
-  const markLessonCompleteMutation = useMutation({
-    mutationFn: async ({ lessonId, score }: { lessonId: string; score?: number }): Promise<void> => {
-      // This would typically call an API endpoint to mark the lesson as complete
-      // For now, we'll just update the local state
-      return Promise.resolve();
-    },
-    onSuccess: async (_, { lessonId, score }) => {
+  const [markLessonCompleteMutation] = useApolloMutation(MARK_LESSON_COMPLETE, {
+    onCompleted: async (data, { variables }) => {
       // Update progress
       await queryClient.invalidateQueries({ queryKey: LESSON_QUERY_KEYS.lessonProgress });
       await queryClient.invalidateQueries({ queryKey: LESSON_QUERY_KEYS.userProgress });
       
       // Update spaced repetition
-      if (score !== undefined) {
+      if (data.markLessonComplete.xpEarned) {
         await updateSpacedRepetition({
-          lessonId,
-          quality: score >= 80 ? 5 : score >= 60 ? 4 : 3,
+          lessonId: variables.input.lessonId,
+          quality: 5, // High quality for completed lessons
         });
       }
       
@@ -204,8 +164,8 @@ export function useLessons(): UseLessonsReturn {
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('lesson:completed', { 
           detail: { 
-            lessonId,
-            score 
+            lessonId: variables.input.lessonId,
+            xpEarned: data.markLessonComplete.xpEarned 
           } 
         }));
       }
@@ -215,6 +175,19 @@ export function useLessons(): UseLessonsReturn {
       setError(errorMessage);
       handleError(error, { action: 'mark-lesson-complete' });
     }
+  });
+
+  // Initialize queries when authenticated
+  const initializeQueries = useCallback(() => {
+    if (isAuthenticated) {
+      getDailyLessonQuery();
+      getUserProgressQuery();
+    }
+  }, [isAuthenticated, getDailyLessonQuery, getUserProgressQuery]);
+
+  // Auto-initialize queries
+  useState(() => {
+    initializeQueries();
   });
 
   // Handle lesson errors
@@ -242,8 +215,8 @@ export function useLessons(): UseLessonsReturn {
   const getDailyLesson = useCallback(async (): Promise<Lesson> => {
     try {
       const result = await refetchDailyLesson();
-      if (result.data) {
-        return result.data;
+      if (result.data?.getDailyLesson) {
+        return result.data.getDailyLesson;
       }
       throw new Error('Failed to fetch daily lesson');
     } catch (error: any) {
@@ -253,22 +226,59 @@ export function useLessons(): UseLessonsReturn {
   }, [refetchDailyLesson, handleLessonError]);
 
   const submitQuiz = useCallback(async (submission: QuizSubmission): Promise<QuizResult> => {
-    return submitQuizMutation.mutateAsync(submission);
+    setIsSubmitting(true);
+    try {
+      const result = await submitQuizMutation({
+        variables: {
+          input: {
+            quizId: submission.quizId,
+            answers: submission.answers,
+            timeSpent: submission.timeSpent
+          }
+        }
+      });
+      return result.data.submitQuiz;
+    } finally {
+      setIsSubmitting(false);
+    }
   }, [submitQuizMutation]);
 
   const switchTone = useCallback(async (tone: string, lessonId?: string): Promise<ToneSwitchResponse> => {
-    return switchToneMutation.mutateAsync({ tone, lessonId });
-  }, [switchToneMutation]);
+    setIsToneSwitching(true);
+    try {
+      const result = await switchToneMutation({
+        variables: {
+          input: {
+            tone,
+            lessonId: lessonId || dailyLessonData?.getDailyLesson?.id,
+            sessionId: sessionStorage.getItem('session_id') || undefined,
+          }
+        }
+      });
+      return result.data.switchTone;
+    } finally {
+      setIsToneSwitching(false);
+    }
+  }, [switchToneMutation, dailyLessonData]);
 
   const markLessonComplete = useCallback(async (lessonId: string, score?: number): Promise<void> => {
-    return markLessonCompleteMutation.mutateAsync({ lessonId, score });
+    const result = await markLessonCompleteMutation({
+      variables: {
+        input: {
+          lessonId,
+          score,
+          completedAt: new Date().toISOString()
+        }
+      }
+    });
+    return result.data.markLessonComplete;
   }, [markLessonCompleteMutation]);
 
   const getLessonProgress = useCallback(async (): Promise<UserProgress> => {
     try {
       const result = await refetchProgress();
-      if (result.data) {
-        return result.data;
+      if (result.data?.userProgress) {
+        return result.data.userProgress;
       }
       throw new Error('Failed to fetch lesson progress');
     } catch (error: any) {
@@ -281,6 +291,50 @@ export function useLessons(): UseLessonsReturn {
     setError(null);
   }, []);
 
+  // Real-time lesson streaming
+  const startLessonStream = useCallback(async (lessonId: string, options: {
+    onChunk?: (chunk: string) => void;
+    onComplete?: (data: any) => void;
+    onError?: (error: any) => void;
+  } = {}) => {
+    if (!isAuthenticated) {
+      throw new Error('User must be authenticated to stream lessons');
+    }
+
+    setIsStreaming(true);
+    setStreamedContent('');
+    
+    try {
+      await apiClient.streamLesson(lessonId, {
+        onChunk: (chunk) => {
+          setStreamedContent(prev => prev + chunk);
+          options.onChunk?.(chunk);
+        },
+        onComplete: (data) => {
+          setIsStreaming(false);
+          options.onComplete?.(data);
+        },
+        onError: (error) => {
+          setIsStreaming(false);
+          setError(error.message);
+          options.onError?.(error);
+        }
+      });
+    } catch (error: any) {
+      setIsStreaming(false);
+      setError(error.message);
+      options.onError?.(error);
+    }
+  }, [isAuthenticated]);
+
+  const stopLessonStream = useCallback(() => {
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
+    setIsStreaming(false);
+  }, []);
+
   // Determine loading state
   const isLoading = isLoadingLesson || isLoadingProgress || !isAuthenticated;
 
@@ -291,12 +345,14 @@ export function useLessons(): UseLessonsReturn {
 
   return {
     // State
-    currentLesson: currentLesson || null,
-    lessonProgress: lessonProgress || null,
+    currentLesson: dailyLessonData?.getDailyLesson || null,
+    lessonProgress: progressData?.userProgress || null,
     isLoading,
     error,
     isSubmitting,
     isToneSwitching,
+    isStreaming,
+    streamedContent,
     
     // Actions
     getDailyLesson,
@@ -305,6 +361,8 @@ export function useLessons(): UseLessonsReturn {
     markLessonComplete,
     getLessonProgress,
     clearError,
+    startLessonStream,
+    stopLessonStream,
   };
 }
 

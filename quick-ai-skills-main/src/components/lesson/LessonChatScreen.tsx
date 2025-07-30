@@ -8,15 +8,29 @@ import { QuickActionToolbar } from "./QuickActionToolbar";
 import { TypingAnimation } from '@/components/ui/typing-animation';
 import { ChatBubbleSkeleton } from '@/components/ui/loading-skeleton';
 import { useAnalytics, ANALYTICS_EVENTS } from '@/hooks/useAnalytics';
+import { useLessons } from '@/hooks/useLessons';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
+import type { Lesson, QuizSubmission, QuizResult } from '@/types/api';
 
 interface ChatMessage {
   id: string;
-  type: "ai" | "user";
+  type: "ai" | "user" | "quiz";
   content: string;
   timestamp: Date;
   isCode?: boolean;
   quickReplies?: string[];
+  quiz?: {
+    id: string;
+    questions: any[];
+    timeLimit?: number;
+    passingScore: number;
+  };
+  quizResult?: {
+    score: number;
+    percentage: number;
+    passed: boolean;
+    feedback: any[];
+  };
 }
 
 interface LessonChatScreenProps {
@@ -28,16 +42,6 @@ interface LessonChatScreenProps {
   onBack?: () => void;
 }
 
-const initialMessages: ChatMessage[] = [
-  {
-    id: "1",
-    type: "ai",
-    content: "Welcome to your AI lesson! Today we'll explore prompt engineering fundamentals. Ready to dive in?",
-    timestamp: new Date(),
-    quickReplies: ["Let's start!", "Tell me more", "I'm ready"]
-  }
-];
-
 export const LessonChatScreen = ({ 
   lessonId, 
   lessonTitle, 
@@ -46,17 +50,50 @@ export const LessonChatScreen = ({
   onComplete,
   onBack 
 }: LessonChatScreenProps) => {
-  const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [lessonProgress, setLessonProgress] = useLocalStorage('lesson_progress', {});
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { track } = useAnalytics();
+  
+  // Use real lesson data
+  const { 
+    currentLesson, 
+    isLoading, 
+    error, 
+    isSubmitting,
+    isStreaming,
+    streamedContent,
+    submitQuiz,
+    switchTone,
+    markLessonComplete,
+    startLessonStream,
+    stopLessonStream,
+    clearError 
+  } = useLessons();
 
-  // Track lesson started
+  // Initialize lesson when data is loaded
   useEffect(() => {
-    track(ANALYTICS_EVENTS.LESSON_STARTED, { lessonId });
-  }, [track, lessonId]);
+    if (currentLesson && messages.length === 0) {
+      const welcomeMessage: ChatMessage = {
+        id: "1",
+        type: "ai",
+        content: currentLesson.description || "Welcome to your AI lesson! Ready to dive in?",
+        timestamp: new Date(),
+        quickReplies: ["Let's start!", "Tell me more", "I'm ready"]
+      };
+      setMessages([welcomeMessage]);
+      
+      // Track lesson started
+      track(ANALYTICS_EVENTS.LESSON_STARTED, { 
+        lessonId: currentLesson.id,
+        lessonTitle: currentLesson.title,
+        difficulty: currentLesson.difficulty,
+        category: currentLesson.category
+      });
+    }
+  }, [currentLesson, messages.length, track]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -66,8 +103,8 @@ export const LessonChatScreen = ({
     scrollToBottom();
   }, [messages]);
 
-  const handleSendMessage = (content: string) => {
-    if (!content.trim()) return;
+  const handleSendMessage = async (content: string) => {
+    if (!content.trim() || !currentLesson) return;
 
     const newUserMessage: ChatMessage = {
       id: Date.now().toString(),
@@ -91,50 +128,227 @@ export const LessonChatScreen = ({
       }
     }));
 
-    // Simulate AI response with typing
-    setTimeout(() => {
-      const responses = [
-        "Great question! Let me break that down for you. Prompt engineering is about crafting effective instructions for AI models...",
-        "That's an excellent observation! Here's how we can build on that idea...",
-        "Perfect! You're really getting the hang of this. Let's try something more advanced...",
-      ];
-      
-      const aiResponse: ChatMessage = {
-        id: (Date.now() + 1).toString(),
+    try {
+      // Start real-time streaming for AI response
+      const aiMessageId = (Date.now() + 1).toString();
+      const aiMessage: ChatMessage = {
+        id: aiMessageId,
         type: "ai",
-        content: responses[Math.floor(Math.random() * responses.length)],
+        content: "",
         timestamp: new Date(),
-        quickReplies: stepNumber < totalSteps ? ["Continue", "Example please", "Got it!"] : undefined
       };
       
-      setMessages(prev => [...prev, aiResponse]);
-      setIsTyping(false);
+      setMessages(prev => [...prev, aiMessage]);
 
-      if (stepNumber >= totalSteps) {
-        setTimeout(() => onComplete?.(), 1000);
-      }
-    }, 1500);
+      // Stream the AI response
+      await startLessonStream(currentLesson.id, {
+        onChunk: (chunk) => {
+          setMessages(prev => prev.map(msg => 
+            msg.id === aiMessageId 
+              ? { ...msg, content: msg.content + chunk }
+              : msg
+          ));
+        },
+        onComplete: (data) => {
+          // Add quick replies if not the final step
+          setMessages(prev => prev.map(msg => 
+            msg.id === aiMessageId 
+              ? { 
+                  ...msg, 
+                  quickReplies: stepNumber < totalSteps ? ["Continue", "Example please", "Got it!"] : undefined 
+                }
+              : msg
+          ));
+          
+          // If this is the final step, mark lesson as complete
+          if (stepNumber >= totalSteps) {
+            setTimeout(async () => {
+              try {
+                await markLessonComplete(currentLesson.id);
+                onComplete?.();
+              } catch (error) {
+                console.error('Failed to mark lesson complete:', error);
+              }
+            }, 1000);
+          }
+        },
+        onError: (error) => {
+          console.error('Streaming error:', error);
+          setMessages(prev => prev.map(msg => 
+            msg.id === aiMessageId 
+              ? { 
+                  ...msg, 
+                  content: "I apologize, but I'm having trouble processing your request right now. Please try again." 
+                }
+              : msg
+          ));
+        }
+      });
+    } catch (error) {
+      console.error('Failed to start lesson stream:', error);
+      const errorMessage: ChatMessage = {
+        id: (Date.now() + 1).toString(),
+        type: "ai",
+        content: "I apologize, but I'm having trouble processing your request right now. Please try again.",
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, errorMessage]);
+    } finally {
+      setIsTyping(false);
+    }
+  };
+
+  // Cleanup streaming on unmount
+  useEffect(() => {
+    return () => {
+      stopLessonStream();
+    };
+  }, [stopLessonStream]);
+
+  const generateAIResponse = async (userInput: string, lesson: Lesson, currentStep: number): Promise<{ content: string; quickReplies?: string[] }> => {
+    // This would typically call an AI service to generate contextual responses
+    // For now, we'll use the lesson content to generate appropriate responses
+    
+    const lessonSection = lesson.content.sections[currentStep - 1];
+    if (lessonSection) {
+      return {
+        content: `Great question! ${lessonSection.content}`,
+        quickReplies: currentStep < lesson.content.sections.length ? ["Continue", "Example please", "Got it!"] : undefined
+      };
+    }
+    
+    // Fallback response
+    const responses = [
+      "Great question! Let me break that down for you. " + lesson.description,
+      "That's an excellent observation! Here's how we can build on that idea...",
+      "Perfect! You're really getting the hang of this. Let's try something more advanced...",
+    ];
+    
+    return {
+      content: responses[Math.floor(Math.random() * responses.length)],
+      quickReplies: currentStep < totalSteps ? ["Continue", "Example please", "Got it!"] : undefined
+    };
   };
 
   const handleQuickReply = (reply: string) => {
     handleSendMessage(reply);
   };
 
-  const handleToneSwitch = (newTone: string) => {
+  const handleToneSwitch = async (newTone: string) => {
+    if (!currentLesson) return;
+    
     track(ANALYTICS_EVENTS.TONE_SWITCHED, { 
       newTone,
-      lessonId 
+      lessonId: currentLesson.id 
     });
     
-    // Show immediate feedback
-    const toneMessage: ChatMessage = {
-      id: Date.now().toString(),
-      type: "ai",
-      content: `Great! I've switched to a ${newTone} tone. Let's continue with this style.`,
-      timestamp: new Date(),
-    };
-    setMessages(prev => [...prev, toneMessage]);
+    try {
+      await switchTone(newTone, currentLesson.id);
+      
+      // Show immediate feedback
+      const toneMessage: ChatMessage = {
+        id: Date.now().toString(),
+        type: "ai",
+        content: `Great! I've switched to a ${newTone} tone. Let's continue with this style.`,
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, toneMessage]);
+    } catch (error) {
+      console.error('Failed to switch tone:', error);
+      const errorMessage: ChatMessage = {
+        id: Date.now().toString(),
+        type: "ai",
+        content: "I apologize, but I couldn't switch the tone right now. Let's continue with our current style.",
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, errorMessage]);
+    }
   };
+
+  const handleQuizSubmission = async (quizId: string, answers: any[], timeSpent: number) => {
+    if (!currentLesson) return;
+
+    try {
+      const submission: QuizSubmission = {
+        quizId,
+        answers,
+        timeSpent
+      };
+
+      const result = await submitQuiz(submission);
+
+      // Add quiz result message
+      const resultMessage: ChatMessage = {
+        id: Date.now().toString(),
+        type: "quiz",
+        content: `Quiz completed! You scored ${result.percentage}% and ${result.passed ? 'passed' : 'need to review'} the material.`,
+        timestamp: new Date(),
+        quizResult: result
+      };
+
+      setMessages(prev => [...prev, resultMessage]);
+
+      // Track quiz completion
+      track(ANALYTICS_EVENTS.QUIZ_COMPLETED, {
+        lessonId: currentLesson.id,
+        quizId,
+        score: result.percentage,
+        passed: result.passed,
+        timeSpent
+      });
+
+      return result;
+    } catch (error) {
+      console.error('Failed to submit quiz:', error);
+      const errorMessage: ChatMessage = {
+        id: Date.now().toString(),
+        type: "ai",
+        content: "I apologize, but there was an error submitting your quiz. Please try again.",
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, errorMessage]);
+      throw error;
+    }
+  };
+
+  const startQuiz = (quiz: any) => {
+    const quizMessage: ChatMessage = {
+      id: Date.now().toString(),
+      type: "quiz",
+      content: "Let's test your knowledge! Answer the following questions:",
+      timestamp: new Date(),
+      quiz
+    };
+    setMessages(prev => [...prev, quizMessage]);
+  };
+
+  // Show loading state
+  if (isLoading) {
+    return (
+      <div className="flex flex-col h-screen bg-background">
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+            <p className="text-muted-foreground">Loading your lesson...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Show error state
+  if (error) {
+    return (
+      <div className="flex flex-col h-screen bg-background">
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center">
+            <p className="text-destructive mb-4">{error}</p>
+            <Button onClick={clearError}>Try Again</Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-screen bg-background">
@@ -154,7 +368,9 @@ export const LessonChatScreen = ({
                 </Button>
               )}
               <div>
-                <h1 className="font-semibold text-lg text-foreground">{lessonTitle}</h1>
+                <h1 className="font-semibold text-lg text-foreground">
+                  {currentLesson?.title || lessonTitle}
+                </h1>
                 <div className="flex items-center gap-2 mt-1">
                   <Badge variant="secondary" className="text-xs">
                     Step {stepNumber} of {totalSteps}
@@ -197,10 +413,13 @@ export const LessonChatScreen = ({
                   message.type === "user" ? "flex-row-reverse" : "flex-row"
                 }`}>
                   <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
-                    message.type === "ai" ? "bg-gradient-primary" : "bg-user-bubble"
+                    message.type === "ai" ? "bg-gradient-primary" : 
+                    message.type === "quiz" ? "bg-quiz-bubble" : "bg-user-bubble"
                   }`}>
                     {message.type === "ai" ? (
                       <Bot className="w-4 h-4 text-primary-foreground" />
+                    ) : message.type === "quiz" ? (
+                      <Zap className="w-4 h-4 text-quiz-foreground" />
                     ) : (
                       <User className="w-4 h-4 text-foreground" />
                     )}
@@ -210,6 +429,8 @@ export const LessonChatScreen = ({
                     <Card className={`${
                       message.type === "ai" 
                         ? "bg-lesson-bubble text-primary-foreground shadow-glow" 
+                        : message.type === "quiz"
+                        ? "bg-quiz-bubble text-quiz-foreground shadow-glow"
                         : "bg-user-bubble"
                     }`}>
                       <CardContent className="p-3">
@@ -221,6 +442,104 @@ export const LessonChatScreen = ({
                           />
                         ) : (
                           <p className="text-sm leading-relaxed">{message.content}</p>
+                        )}
+                        
+                        {/* Quiz Questions */}
+                        {message.type === "quiz" && message.quiz && !message.quizResult && (
+                          <div className="mt-4 space-y-4">
+                            {message.quiz.questions.map((question, index) => (
+                              <div key={question.id} className="border rounded-lg p-3 bg-background/50">
+                                <p className="font-medium mb-2">
+                                  {index + 1}. {question.question}
+                                </p>
+                                {question.type === 'multiple-choice' && question.options && (
+                                  <div className="space-y-2">
+                                    {question.options.map((option: string, optionIndex: number) => (
+                                      <label key={optionIndex} className="flex items-center space-x-2 cursor-pointer">
+                                        <input
+                                          type="radio"
+                                          name={`question-${question.id}`}
+                                          value={option}
+                                          className="text-primary"
+                                        />
+                                        <span className="text-sm">{option}</span>
+                                      </label>
+                                    ))}
+                                  </div>
+                                )}
+                                {question.type === 'true-false' && (
+                                  <div className="space-y-2">
+                                    <label className="flex items-center space-x-2 cursor-pointer">
+                                      <input
+                                        type="radio"
+                                        name={`question-${question.id}`}
+                                        value="true"
+                                        className="text-primary"
+                                      />
+                                      <span className="text-sm">True</span>
+                                    </label>
+                                    <label className="flex items-center space-x-2 cursor-pointer">
+                                      <input
+                                        type="radio"
+                                        name={`question-${question.id}`}
+                                        value="false"
+                                        className="text-primary"
+                                      />
+                                      <span className="text-sm">False</span>
+                                    </label>
+                                  </div>
+                                )}
+                                {question.type === 'fill-blank' && (
+                                  <input
+                                    type="text"
+                                    placeholder="Enter your answer..."
+                                    className="w-full p-2 border rounded text-sm"
+                                  />
+                                )}
+                              </div>
+                            ))}
+                            <Button 
+                              onClick={() => {
+                                // Collect answers and submit quiz
+                                const answers = message.quiz!.questions.map((question: any) => {
+                                  const input = document.querySelector(`input[name="question-${question.id}"]:checked`) as HTMLInputElement;
+                                  return {
+                                    questionId: question.id,
+                                    answer: input?.value || ''
+                                  };
+                                });
+                                handleQuizSubmission(message.quiz!.id, answers, 0);
+                              }}
+                              className="w-full bg-primary text-primary-foreground"
+                            >
+                              Submit Quiz
+                            </Button>
+                          </div>
+                        )}
+                        
+                        {/* Quiz Results */}
+                        {message.type === "quiz" && message.quizResult && (
+                          <div className="mt-4 p-3 bg-background/50 rounded-lg">
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="font-medium">Score: {message.quizResult.percentage}%</span>
+                              <Badge variant={message.quizResult.passed ? "default" : "destructive"}>
+                                {message.quizResult.passed ? "Passed" : "Failed"}
+                              </Badge>
+                            </div>
+                            {message.quizResult.feedback && (
+                              <div className="space-y-2">
+                                <p className="text-sm font-medium">Feedback:</p>
+                                {message.quizResult.feedback.map((item: any, index: number) => (
+                                  <div key={index} className="text-sm">
+                                    <span className={item.correct ? "text-green-600" : "text-red-600"}>
+                                      {item.correct ? "✓" : "✗"}
+                                    </span>
+                                    <span className="ml-2">{item.explanation}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
                         )}
                       </CardContent>
                     </Card>
@@ -264,10 +583,11 @@ export const LessonChatScreen = ({
               placeholder="Type your response..."
               onKeyPress={(e) => e.key === "Enter" && handleSendMessage(inputValue)}
               className="flex-1"
+              disabled={isSubmitting}
             />
             <Button 
               onClick={() => handleSendMessage(inputValue)}
-              disabled={!inputValue.trim()}
+              disabled={!inputValue.trim() || isSubmitting}
               className="bg-gradient-primary border-0 text-primary-foreground hover:opacity-90"
             >
               <Send className="w-4 h-4" />

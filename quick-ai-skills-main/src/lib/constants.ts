@@ -8,6 +8,10 @@ export const ENV = {
   AUTH_DOMAIN: import.meta.env.VITE_AUTH_DOMAIN || 'localhost',
   AUTH_CLIENT_ID: import.meta.env.VITE_AUTH_CLIENT_ID || '',
   
+  // Supabase Configuration
+  SUPABASE_URL: import.meta.env.VITE_SUPABASE_URL || '',
+  SUPABASE_ANON_KEY: import.meta.env.VITE_SUPABASE_ANON_KEY || '',
+  
   // Analytics
   POSTHOG_KEY: import.meta.env.VITE_POSTHOG_KEY || '',
   POSTHOG_HOST: import.meta.env.VITE_POSTHOG_HOST || 'https://app.posthog.com',
@@ -61,6 +65,7 @@ export const API_ENDPOINTS = {
     PROGRESS: `${ENV.API_BASE_URL}/lessons/progress`,
     SUBMIT_QUIZ: `${ENV.API_BASE_URL}/lessons/quiz`,
     SWITCH_TONE: `${ENV.API_BASE_URL}/lessons/tone`,
+    STREAM: `${ENV.API_BASE_URL}/lessons/stream`,
   },
   
   PROJECTS: {

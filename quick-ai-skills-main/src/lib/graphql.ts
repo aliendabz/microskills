@@ -2,7 +2,169 @@ import { ApolloClient, InMemoryCache, createHttpLink, from } from '@apollo/clien
 import { setContext } from '@apollo/client/link/context';
 import { onError } from '@apollo/client/link/error';
 import { RetryLink } from '@apollo/client/link/retry';
+import { gql } from '@apollo/client';
 import { ENV, STORAGE_KEYS, ERROR_MESSAGES, REQUEST_CONFIG } from './constants';
+
+// GraphQL Queries
+export const GET_DAILY_LESSON = gql`
+  query GetDailyLesson {
+    getDailyLesson {
+      id
+      title
+      description
+      content {
+        sections {
+          id
+          title
+          content
+          order
+          type
+          metadata
+        }
+        resources {
+          id
+          title
+          type
+          url
+          description
+        }
+        quiz {
+          id
+          questions {
+            id
+            question
+            type
+            options
+            correctAnswer
+            explanation
+            points
+          }
+          timeLimit
+          passingScore
+        }
+      }
+      difficulty
+      duration
+      tags
+      category
+      prerequisites
+      objectives
+      estimatedTime
+      createdAt
+      updatedAt
+    }
+  }
+`;
+
+export const GET_USER_PROGRESS = gql`
+  query GetUserProgress {
+    userProgress {
+      userId
+      lessonsCompleted
+      totalLessons
+      currentStreak
+      longestStreak
+      totalXp
+      level
+      achievements {
+        id
+        title
+        description
+        icon
+        category
+        rarity
+        xpReward
+        unlockedAt
+        progress {
+          current
+          target
+          percentage
+        }
+      }
+      recentActivity {
+        id
+        type
+        title
+        description
+        xpEarned
+        timestamp
+        metadata
+      }
+      weeklyProgress {
+        weekStart
+        lessonsCompleted
+        xpEarned
+        streakDays
+        goals {
+          id
+          title
+          target
+          current
+          type
+          deadline
+          completed
+        }
+      }
+      monthlyProgress {
+        month
+        lessonsCompleted
+        xpEarned
+        averageStreak
+        topCategories {
+          category
+          lessonsCompleted
+          totalLessons
+          averageScore
+        }
+      }
+    }
+  }
+`;
+
+// GraphQL Mutations
+export const SUBMIT_QUIZ = gql`
+  mutation SubmitQuiz($input: QuizSubmissionInput!) {
+    submitQuiz(input: $input) {
+      score
+      totalPoints
+      percentage
+      passed
+      feedback {
+        questionId
+        correct
+        explanation
+        pointsEarned
+      }
+      timeSpent
+      submittedAt
+    }
+  }
+`;
+
+export const SWITCH_TONE = gql`
+  mutation SwitchTone($input: ToneSwitchInput!) {
+    switchTone(input: $input) {
+      success
+      newTone
+      message
+    }
+  }
+`;
+
+export const MARK_LESSON_COMPLETE = gql`
+  mutation MarkLessonComplete($input: LessonCompletionInput!) {
+    markLessonComplete(input: $input) {
+      success
+      xpEarned
+      achievements {
+        id
+        title
+        description
+        icon
+      }
+    }
+  }
+`;
 
 // HTTP Link
 const httpLink = createHttpLink({

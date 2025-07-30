@@ -359,6 +359,77 @@ export class ApiClient {
   async sendNotification(notificationData: any): Promise<ApiResponse<any>> {
     return this.post(API_ENDPOINTS.NOTIFICATIONS.SEND, notificationData);
   }
+
+  // Server-Sent Events for real-time lesson streaming
+  async createEventSource(endpoint: string, options: {
+    onMessage?: (event: MessageEvent) => void;
+    onError?: (event: Event) => void;
+    onOpen?: (event: Event) => void;
+    headers?: Record<string, string>;
+  } = {}): Promise<EventSource> {
+    const url = endpoint.startsWith('http') ? endpoint : `${this.baseURL}${endpoint}`;
+    
+    // Create EventSource with authentication
+    const token = this.getAuthToken();
+    const eventSourceUrl = new URL(url);
+    if (token) {
+      eventSourceUrl.searchParams.append('token', token);
+    }
+    
+    const eventSource = new EventSource(eventSourceUrl.toString());
+    
+    // Set up event handlers
+    if (options.onMessage) {
+      eventSource.onmessage = options.onMessage;
+    }
+    
+    if (options.onError) {
+      eventSource.onerror = options.onError;
+    }
+    
+    if (options.onOpen) {
+      eventSource.onopen = options.onOpen;
+    }
+    
+    return eventSource;
+  }
+
+  // Real-time lesson streaming
+  async streamLesson(lessonId: string, options: {
+    onChunk?: (chunk: any) => void;
+    onComplete?: (data: any) => void;
+    onError?: (error: any) => void;
+  } = {}): Promise<void> {
+    const endpoint = `${API_ENDPOINTS.LESSONS.STREAM}/${lessonId}`;
+    
+    try {
+      const eventSource = await this.createEventSource(endpoint, {
+        onMessage: (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            
+            if (data.type === 'chunk') {
+              options.onChunk?.(data.content);
+            } else if (data.type === 'complete') {
+              options.onComplete?.(data);
+              eventSource.close();
+            } else if (data.type === 'error') {
+              options.onError?.(new Error(data.message));
+              eventSource.close();
+            }
+          } catch (error) {
+            options.onError?.(error);
+            eventSource.close();
+          }
+        },
+        onError: (event) => {
+          options.onError?.(new Error('EventSource error'));
+        }
+      });
+    } catch (error) {
+      options.onError?.(error);
+    }
+  }
 }
 
 // Export singleton instance
