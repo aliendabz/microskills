@@ -47,13 +47,13 @@ GraphQL schema should match the TDD specifications
 Error boundaries should be implemented for graceful failure handling
 
 ## Tasks
-[ ] 1.0 Set up GraphQL Gateway and API Infrastructure
+[x] 1.0 Set up GraphQL Gateway and API Infrastructure
     [x] 1.1 Create GraphQL client configuration with Apollo Client
     [x] 1.2 Set up environment variable management for API endpoints
     [x] 1.3 Implement API client service with error handling and retry logic
     [x] 1.4 Create TypeScript interfaces for all API responses
     [x] 1.5 Set up authentication token management and refresh logic
-    [ ] 1.6 Implement request/response interceptors for logging and error handling
+    [x] 1.6 Implement request/response interceptors for logging and error handling
 [ ] 2.0 Replace Mock Authentication with Real Auth Service
     [ ] 2.1 Implement Supabase Auth integration for OAuth providers
     [ ] 2.2 Create authentication hook with login/logout functionality

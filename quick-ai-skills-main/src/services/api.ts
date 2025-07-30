@@ -1,4 +1,5 @@
 import { ENV, API_ENDPOINTS, HTTP_STATUS, ERROR_MESSAGES, STORAGE_KEYS, REQUEST_CONFIG } from '@/lib/constants';
+import { interceptorManager } from '@/utils/interceptors';
 
 // Types for API responses
 export interface ApiResponse<T = any> {
@@ -178,36 +179,74 @@ export class ApiClient {
     const url = endpoint.startsWith('http') ? endpoint : `${this.baseURL}${endpoint}`;
     const requestHeaders = { ...this.getDefaultHeaders(), ...headers };
 
+    // Create interceptor request config
+    const interceptorConfig = interceptorManager.createRequestConfig(
+      url,
+      method,
+      requestHeaders,
+      body,
+      timeout,
+      retries
+    );
+
     const requestFn = async (): Promise<ApiResponse<T>> => {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), timeout);
-
       try {
-        const requestConfig: RequestInit = {
-          method,
-          headers: requestHeaders,
-          signal: controller.signal,
-        };
-
-        if (body && method !== 'GET') {
-          requestConfig.body = typeof body === 'string' ? body : JSON.stringify(body);
-        }
-
-        const response = await fetch(url, requestConfig);
-        clearTimeout(timeoutId);
+        // Execute request interceptors
+        const processedConfig = await interceptorManager.executeRequestInterceptors(interceptorConfig);
         
-        return await this.handleResponse<T>(response);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), processedConfig.timeout || timeout);
+
+        try {
+          const requestConfig: RequestInit = {
+            method: processedConfig.method,
+            headers: processedConfig.headers,
+            signal: controller.signal,
+          };
+
+          if (processedConfig.body && processedConfig.method !== 'GET') {
+            requestConfig.body = typeof processedConfig.body === 'string' 
+              ? processedConfig.body 
+              : JSON.stringify(processedConfig.body);
+          }
+
+          const response = await fetch(processedConfig.url, requestConfig);
+          clearTimeout(timeoutId);
+          
+          const apiResponse = await this.handleResponse<T>(response);
+          
+          // Execute response interceptors
+          return await interceptorManager.executeResponseInterceptors(apiResponse, processedConfig);
+        } catch (error) {
+          clearTimeout(timeoutId);
+          
+          let apiError: ApiError;
+          
+          if (error.name === 'AbortError') {
+            apiError = {
+              message: ERROR_MESSAGES.TIMEOUT_ERROR,
+              status: 0,
+              code: 'TIMEOUT_ERROR',
+            };
+          } else if (error instanceof TypeError) {
+            apiError = {
+              message: ERROR_MESSAGES.NETWORK_ERROR,
+              status: 0,
+              code: 'NETWORK_ERROR',
+            };
+          } else {
+            apiError = {
+              message: error.message || ERROR_MESSAGES.UNKNOWN_ERROR,
+              status: 0,
+              code: 'UNKNOWN_ERROR',
+            };
+          }
+          
+          // Execute response error interceptors
+          await interceptorManager.executeResponseErrorInterceptors(apiError, processedConfig);
+        }
       } catch (error) {
-        clearTimeout(timeoutId);
-        
-        if (error.name === 'AbortError') {
-          throw new Error(ERROR_MESSAGES.TIMEOUT_ERROR);
-        }
-        
-        if (error instanceof TypeError) {
-          throw new Error(ERROR_MESSAGES.NETWORK_ERROR);
-        }
-        
+        // If interceptor execution fails, throw the error
         throw error;
       }
     };

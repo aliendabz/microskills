@@ -183,6 +183,7 @@ class InterceptorManager {
       }
     }
 
+    // Always throw the final error
     throw error;
   }
 
@@ -346,15 +347,17 @@ class InterceptorManager {
     const sanitized = { ...headers };
     const sensitiveHeaders = ['authorization', 'cookie', 'x-api-key'];
     
+    // Create a case-insensitive map of headers
+    const headerMap = new Map<string, string>();
+    Object.entries(sanitized).forEach(([key, value]) => {
+      headerMap.set(key.toLowerCase(), key);
+    });
+    
     sensitiveHeaders.forEach(header => {
-      // Check for both lowercase and original case
-      const headerKeys = Object.keys(sanitized).filter(key => 
-        key.toLowerCase() === header.toLowerCase()
-      );
-      
-      headerKeys.forEach(key => {
-        sanitized[key] = '[REDACTED]';
-      });
+      const headerKey = headerMap.get(header.toLowerCase());
+      if (headerKey) {
+        sanitized[headerKey] = '[REDACTED]';
+      }
     });
 
     return sanitized;
