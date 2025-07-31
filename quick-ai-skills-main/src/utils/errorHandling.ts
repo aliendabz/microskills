@@ -122,6 +122,7 @@ export class ErrorHandler {
     if (status >= 500) return ErrorSeverity.HIGH;
     if (status === 401 || status === 403) return ErrorSeverity.MEDIUM;
     if (status === 0) return ErrorSeverity.CRITICAL; // Network error
+    if (status === 408) return ErrorSeverity.CRITICAL; // Timeout error
     if (context.endpoint?.includes('/auth/')) return ErrorSeverity.MEDIUM;
     return ErrorSeverity.LOW;
   }
@@ -475,9 +476,6 @@ export class ErrorHandler {
 // Create singleton instance
 export const errorHandler = new ErrorHandler();
 
-// Export the class for testing
-export { ErrorHandler };
-
 // Export default instance
 export default errorHandler;
 
@@ -505,6 +503,16 @@ export const handleTimeoutError = (
   userId?: string,
   sessionId?: string
 ): Promise<ApiError> => errorHandler.handleTimeoutError(endpoint, method, timeout, userId, sessionId);
+
+export const handleError = (
+  error: ApiError,
+  requestInfo?: {
+    endpoint?: string;
+    method?: string;
+    userId?: string;
+    sessionId?: string;
+  }
+): Promise<void> => errorHandler.handleError(error, requestInfo);
 
 export const getErrorStats = (): ErrorStats => errorHandler.getErrorStats();
 export const resolveError = (errorId: string): Promise<void> => errorHandler.resolveError(errorId);

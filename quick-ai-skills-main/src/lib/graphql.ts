@@ -166,6 +166,301 @@ export const MARK_LESSON_COMPLETE = gql`
   }
 `;
 
+// Spaced Repetition Queries
+export const GET_SPACED_REPETITION_ITEMS = gql`
+  query GetSpacedRepetitionItems {
+    spacedRepetitionItems {
+      id
+      userId
+      lessonId
+      interval
+      repetitions
+      easeFactor
+      nextReview
+      lastReview
+      createdAt
+    }
+  }
+`;
+
+export const GET_DUE_REVIEWS = gql`
+  query GetDueReviews {
+    dueReviews {
+      id
+      lessonId
+      interval
+      repetitions
+      easeFactor
+      nextReview
+      lastReview
+      priority
+      daysOverdue
+    }
+  }
+`;
+
+// Spaced Repetition Mutations
+export const UPDATE_SPACED_REPETITION = gql`
+  mutation UpdateSpacedRepetition($input: SpacedRepetitionInput!) {
+    updateSpacedRepetition(input: $input) {
+      itemId
+      nextReview
+      interval
+      repetitions
+      easeFactor
+      success
+    }
+  }
+`;
+
+export const CREATE_SPACED_REPETITION_ITEM = gql`
+  mutation CreateSpacedRepetitionItem($input: CreateSpacedRepetitionInput!) {
+    createSpacedRepetitionItem(input: $input) {
+      id
+      lessonId
+      interval
+      repetitions
+      easeFactor
+      nextReview
+      success
+    }
+  }
+`;
+
+// Lesson Progress Tracking Queries
+export const GET_LESSON_PROGRESS = gql`
+  query GetLessonProgress($lessonId: ID!) {
+    lessonProgress(lessonId: $lessonId) {
+      id
+      userId
+      lessonId
+      status
+      progress
+      sectionsCompleted
+      totalSections
+      timeSpent
+      lastAccessedAt
+      completedAt
+      score
+      attempts
+      metadata
+    }
+  }
+`;
+
+export const GET_USER_LESSON_PROGRESS = gql`
+  query GetUserLessonProgress {
+    userLessonProgress {
+      id
+      lessonId
+      status
+      progress
+      sectionsCompleted
+      totalSections
+      timeSpent
+      lastAccessedAt
+      completedAt
+      score
+      attempts
+      metadata
+      lesson {
+        id
+        title
+        category
+        difficulty
+      }
+    }
+  }
+`;
+
+export const GET_PROGRESS_ANALYTICS = gql`
+  query GetProgressAnalytics($timeframe: String) {
+    progressAnalytics(timeframe: $timeframe) {
+      totalLessons
+      completedLessons
+      inProgressLessons
+      averageScore
+      totalTimeSpent
+      averageTimePerLesson
+      completionRate
+      categoryBreakdown {
+        category
+        lessonsCompleted
+        totalLessons
+        averageScore
+        averageTime
+      }
+      weeklyProgress {
+        weekStart
+        lessonsCompleted
+        timeSpent
+        averageScore
+      }
+      monthlyProgress {
+        month
+        lessonsCompleted
+        timeSpent
+        averageScore
+      }
+    }
+  }
+`;
+
+// Lesson Progress Tracking Mutations
+export const UPDATE_LESSON_PROGRESS = gql`
+  mutation UpdateLessonProgress($input: LessonProgressInput!) {
+    updateLessonProgress(input: $input) {
+      id
+      progress
+      sectionsCompleted
+      timeSpent
+      lastAccessedAt
+      success
+    }
+  }
+`;
+
+export const COMPLETE_LESSON_SECTION = gql`
+  mutation CompleteLessonSection($input: SectionCompletionInput!) {
+    completeLessonSection(input: $input) {
+      id
+      sectionId
+      completedAt
+      timeSpent
+      score
+      success
+    }
+  }
+`;
+
+export const START_LESSON_SESSION = gql`
+  mutation StartLessonSession($input: LessonSessionInput!) {
+    startLessonSession(input: $input) {
+      sessionId
+      lessonId
+      startedAt
+      success
+    }
+  }
+`;
+
+export const END_LESSON_SESSION = gql`
+  mutation EndLessonSession($input: LessonSessionEndInput!) {
+    endLessonSession(input: $input) {
+      sessionId
+      totalTimeSpent
+      progress
+      success
+    }
+  }
+`;
+
+export const SAVE_LESSON_STATE = gql`
+  mutation SaveLessonState($input: LessonStateInput!) {
+    saveLessonState(input: $input) {
+      id
+      lessonId
+      state
+      savedAt
+      success
+    }
+  }
+`;
+
+export const GET_LESSON_STATE = gql`
+  query GetLessonState($lessonId: ID!) {
+    lessonState(lessonId: $lessonId) {
+      id
+      lessonId
+      state
+      savedAt
+    }
+  }
+`;
+
+// Project Submission Mutations
+export const SUBMIT_PROJECT = gql`
+  mutation SubmitProject($input: ProjectSubmissionInput!) {
+    submitProject(input: $input) {
+      id
+      projectId
+      status
+      score
+      percentage
+      passed
+      feedback {
+        id
+        type
+        message
+        severity
+        lineNumber
+        suggestion
+      }
+      submittedAt
+      gradedAt
+      processingTime
+      metadata
+    }
+  }
+`;
+
+export const GET_PROJECT_STATUS = gql`
+  query GetProjectStatus($projectId: ID!) {
+    projectStatus(projectId: $projectId) {
+      id
+      projectId
+      status
+      score
+      percentage
+      passed
+      feedback {
+        id
+        type
+        message
+        severity
+        lineNumber
+        suggestion
+      }
+      submittedAt
+      gradedAt
+      processingTime
+      metadata
+    }
+  }
+`;
+
+export const GET_PROJECT_HISTORY = gql`
+  query GetProjectHistory {
+    projectHistory {
+      id
+      projectId
+      status
+      score
+      percentage
+      passed
+      feedback {
+        id
+        type
+        message
+        severity
+        lineNumber
+        suggestion
+      }
+      submittedAt
+      gradedAt
+      processingTime
+      metadata
+      project {
+        id
+        title
+        description
+        difficulty
+        category
+      }
+    }
+  }
+`;
+
 // HTTP Link
 const httpLink = createHttpLink({
   uri: ENV.GRAPHQL_ENDPOINT,

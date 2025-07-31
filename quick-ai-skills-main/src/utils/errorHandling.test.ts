@@ -21,12 +21,21 @@ Object.defineProperty(window, 'localStorage', {
 });
 
 // Mock console methods
-const consoleSpy = {
-  error: vi.spyOn(console, 'error').mockImplementation(() => {}),
-  warn: vi.spyOn(console, 'warn').mockImplementation(() => {}),
-  info: vi.spyOn(console, 'info').mockImplementation(() => {}),
-  log: vi.spyOn(console, 'log').mockImplementation(() => {}),
+let consoleSpy: {
+  error: any;
+  warn: any;
+  info: any;
+  log: any;
 };
+
+beforeEach(() => {
+  consoleSpy = {
+    error: vi.spyOn(console, 'error').mockImplementation(() => {}),
+    warn: vi.spyOn(console, 'warn').mockImplementation(() => {}),
+    info: vi.spyOn(console, 'info').mockImplementation(() => {}),
+    log: vi.spyOn(console, 'log').mockImplementation(() => {}),
+  };
+});
 
 // Mock navigator
 Object.defineProperty(window, 'navigator', {
@@ -210,6 +219,9 @@ describe('ErrorHandler', () => {
         endpoint: '/api/test',
         method: 'GET',
       });
+
+      // Wait for the async operation to complete
+      await new Promise(resolve => setTimeout(resolve, 0));
 
       expect(consoleSpy.error).toHaveBeenCalled();
       expect(consoleSpy.error.mock.calls[0][0]).toContain('[HIGH]');
@@ -422,8 +434,11 @@ describe('ErrorHandler', () => {
       expect(result.code).toBe('TIMEOUT_ERROR');
       expect(result.message).toBe('Request timed out. Please try again.');
 
+      // Wait for the async operation to complete
+      await new Promise(resolve => setTimeout(resolve, 0));
+
       const stats = errorHandlerInstance.getErrorStats();
-      expect(stats.errorsByCategory.network).toBe(1);
+      expect(stats.errorsByCategory.timeout).toBe(1);
     });
   });
 
@@ -571,6 +586,9 @@ describe('ErrorHandler', () => {
       };
 
       await errorHandlerInstance.handleError(apiError);
+
+      // Wait for the async operation to complete
+      await new Promise(resolve => setTimeout(resolve, 0));
 
       expect(consoleSpy.log).toHaveBeenCalledWith(
         'User Notification:',

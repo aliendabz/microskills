@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from './useAuth';
-import { apiClient } from '@/services/api';
+import { apolloClient, SUBMIT_PROJECT, GET_PROJECT_STATUS, GET_PROJECT_HISTORY } from '@/lib/graphql';
 import { handleError } from '@/utils/errorHandling';
 import type { 
   Project, 
@@ -55,8 +55,11 @@ export function useProjects(): UseProjectsReturn {
   } = useQuery({
     queryKey: PROJECT_QUERY_KEYS.projectHistory,
     queryFn: async (): Promise<ProjectResult[]> => {
-      const response = await apiClient.getProjectHistory();
-      return response.data;
+      const { data } = await apolloClient.query({
+        query: GET_PROJECT_HISTORY,
+        fetchPolicy: 'network-only',
+      });
+      return data.projectHistory || [];
     },
     enabled: isAuthenticated,
     staleTime: 5 * 60 * 1000, // 5 minutes
@@ -73,13 +76,30 @@ export function useProjects(): UseProjectsReturn {
   // Submit project mutation
   const submitProjectMutation = useMutation({
     mutationFn: async (submission: ProjectSubmission): Promise<ProjectResult> => {
-      setIsSubmitting(true);
       try {
-        const response = await apiClient.submitProject(submission);
-        return response.data;
-      } finally {
-        setIsSubmitting(false);
+        const { data } = await apolloClient.mutate({
+          mutation: SUBMIT_PROJECT,
+          variables: {
+            input: {
+              projectId: submission.projectId,
+              code: submission.code,
+              language: submission.language,
+              files: submission.files,
+              metadata: submission.metadata
+            }
+          },
+        });
+        return data.submitProject;
+      } catch (error: any) {
+        const errorMessage = error.message || 'Failed to submit project. Please try again.';
+        setError(errorMessage);
+        handleError(error, { action: 'submit-project' });
+        throw error;
       }
+    },
+    onMutate: () => {
+      setIsSubmitting(true);
+      setError(null);
     },
     onSuccess: async (result, submission) => {
       // Update project history
@@ -108,19 +128,32 @@ export function useProjects(): UseProjectsReturn {
       const errorMessage = error.message || 'Failed to submit project. Please try again.';
       setError(errorMessage);
       handleError(error, { action: 'submit-project' });
+    },
+    onSettled: () => {
+      setIsSubmitting(false);
     }
   });
 
   // Check project status mutation
   const checkProjectStatusMutation = useMutation({
     mutationFn: async (projectId: string): Promise<ProjectResult> => {
-      setIsCheckingStatus(true);
       try {
-        const response = await apiClient.getProjectStatus(projectId);
-        return response.data;
-      } finally {
-        setIsCheckingStatus(false);
+        const { data } = await apolloClient.query({
+          query: GET_PROJECT_STATUS,
+          variables: { projectId },
+          fetchPolicy: 'network-only',
+        });
+        return data.projectStatus;
+      } catch (error: any) {
+        const errorMessage = error.message || 'Failed to check project status. Please try again.';
+        setError(errorMessage);
+        handleError(error, { action: 'check-project-status' });
+        throw error;
       }
+    },
+    onMutate: () => {
+      setIsCheckingStatus(true);
+      setError(null);
     },
     onSuccess: (result) => {
       // Update the specific project in history
@@ -151,21 +184,44 @@ export function useProjects(): UseProjectsReturn {
       const errorMessage = error.message || 'Failed to check project status. Please try again.';
       setError(errorMessage);
       handleError(error, { action: 'check-project-status' });
+    },
+    onSettled: () => {
+      setIsCheckingStatus(false);
     }
   });
 
   // Resubmit project mutation
   const resubmitProjectMutation = useMutation({
     mutationFn: async ({ projectId, submission }: { projectId: string; submission: ProjectSubmission }): Promise<ProjectResult> => {
-      setIsSubmitting(true);
       try {
-        // For resubmission, we might need a different endpoint or method
-        // For now, we'll use the same submit endpoint
-        const response = await apiClient.submitProject(submission);
-        return response.data;
-      } finally {
-        setIsSubmitting(false);
+        // For resubmission, we use the same submitProject mutation
+        const { data } = await apolloClient.mutate({
+          mutation: SUBMIT_PROJECT,
+          variables: {
+            input: {
+              projectId: submission.projectId,
+              code: submission.code,
+              language: submission.language,
+              files: submission.files,
+              metadata: {
+                ...submission.metadata,
+                resubmission: true,
+                originalProjectId: projectId
+              }
+            }
+          },
+        });
+        return data.submitProject;
+      } catch (error: any) {
+        const errorMessage = error.message || 'Failed to resubmit project. Please try again.';
+        setError(errorMessage);
+        handleError(error, { action: 'resubmit-project' });
+        throw error;
       }
+    },
+    onMutate: () => {
+      setIsSubmitting(true);
+      setError(null);
     },
     onSuccess: async (result, { projectId, submission }) => {
       // Update project history
@@ -189,6 +245,9 @@ export function useProjects(): UseProjectsReturn {
       const errorMessage = error.message || 'Failed to resubmit project. Please try again.';
       setError(errorMessage);
       handleError(error, { action: 'resubmit-project' });
+    },
+    onSettled: () => {
+      setIsSubmitting(false);
     }
   });
 

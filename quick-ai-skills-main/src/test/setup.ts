@@ -1,4 +1,5 @@
 import { vi } from 'vitest';
+import '@testing-library/jest-dom';
 
 // Mock environment variables
 vi.stubEnv('VITE_GRAPHQL_ENDPOINT', 'http://localhost:4000/graphql');

@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { apolloClient, clearApolloCache, resetApolloStore } from './graphql';
+import { 
+  apolloClient, 
+  clearApolloCache, 
+  resetApolloStore,
+  SUBMIT_PROJECT,
+  GET_PROJECT_STATUS,
+  GET_PROJECT_HISTORY
+} from './graphql';
 
 // Mock localStorage
 const localStorageMock = {
@@ -155,6 +162,53 @@ describe('GraphQL Client Configuration', () => {
       
       // This is configured in the graphql.ts file
       expect(defaultEndpoint).toBe('http://localhost:4000/graphql');
+    });
+  });
+
+  describe('Project Mutations and Queries', () => {
+    it('should have SUBMIT_PROJECT mutation defined', () => {
+      expect(SUBMIT_PROJECT).toBeDefined();
+      expect(SUBMIT_PROJECT.loc?.source.body).toContain('mutation SubmitProject');
+      expect(SUBMIT_PROJECT.loc?.source.body).toContain('submitProject');
+    });
+
+    it('should have GET_PROJECT_STATUS query defined', () => {
+      expect(GET_PROJECT_STATUS).toBeDefined();
+      expect(GET_PROJECT_STATUS.loc?.source.body).toContain('query GetProjectStatus');
+      expect(GET_PROJECT_STATUS.loc?.source.body).toContain('projectStatus');
+    });
+
+    it('should have GET_PROJECT_HISTORY query defined', () => {
+      expect(GET_PROJECT_HISTORY).toBeDefined();
+      expect(GET_PROJECT_HISTORY.loc?.source.body).toContain('query GetProjectHistory');
+      expect(GET_PROJECT_HISTORY.loc?.source.body).toContain('projectHistory');
+    });
+
+    it('should have correct structure for project submission input', () => {
+      const mutationBody = SUBMIT_PROJECT.loc?.source.body || '';
+      expect(mutationBody).toContain('ProjectSubmissionInput');
+      expect(mutationBody).toContain('submitProject');
+      expect(mutationBody).toContain('input: $input');
+    });
+
+    it('should have correct structure for project result', () => {
+      const mutationBody = SUBMIT_PROJECT.loc?.source.body || '';
+      expect(mutationBody).toContain('id');
+      expect(mutationBody).toContain('status');
+      expect(mutationBody).toContain('score');
+      expect(mutationBody).toContain('percentage');
+      expect(mutationBody).toContain('passed');
+      expect(mutationBody).toContain('feedback');
+    });
+
+    it('should have feedback structure in project queries', () => {
+      const queryBody = GET_PROJECT_STATUS.loc?.source.body || '';
+      expect(queryBody).toContain('feedback');
+      expect(queryBody).toContain('type');
+      expect(queryBody).toContain('message');
+      expect(queryBody).toContain('severity');
+      expect(queryBody).toContain('lineNumber');
+      expect(queryBody).toContain('suggestion');
     });
   });
 });

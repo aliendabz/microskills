@@ -542,6 +542,156 @@ export interface SpacedRepetitionResponse {
   easeFactor: number;
 }
 
+export interface SpacedRepetitionInput {
+  lessonId: string;
+  quality: number; // 0-5 rating
+}
+
+export interface CreateSpacedRepetitionInput {
+  lessonId: string;
+  initialQuality: number;
+}
+
+export interface DueReviewItem {
+  id: string;
+  lessonId: string;
+  interval: number;
+  repetitions: number;
+  easeFactor: number;
+  nextReview: string;
+  lastReview?: string;
+  priority: number;
+  daysOverdue: number;
+}
+
+// Lesson Progress Tracking Types
+export interface LessonProgress {
+  id: string;
+  userId: string;
+  lessonId: string;
+  status: 'not_started' | 'in_progress' | 'completed' | 'paused';
+  progress: number; // 0-100 percentage
+  sectionsCompleted: number;
+  totalSections: number;
+  timeSpent: number; // in seconds
+  lastAccessedAt: string;
+  completedAt?: string;
+  score?: number;
+  attempts: number;
+  metadata?: Record<string, any>;
+}
+
+export interface LessonProgressInput {
+  lessonId: string;
+  progress?: number;
+  sectionsCompleted?: number;
+  timeSpent?: number;
+  status?: 'not_started' | 'in_progress' | 'completed' | 'paused';
+  metadata?: Record<string, any>;
+}
+
+export interface SectionCompletionInput {
+  lessonId: string;
+  sectionId: string;
+  timeSpent: number;
+  score?: number;
+  metadata?: Record<string, any>;
+}
+
+export interface SectionCompletion {
+  id: string;
+  sectionId: string;
+  completedAt: string;
+  timeSpent: number;
+  score?: number;
+  success: boolean;
+}
+
+export interface LessonSessionInput {
+  lessonId: string;
+  sessionType?: 'learning' | 'review' | 'quiz';
+  metadata?: Record<string, any>;
+}
+
+export interface LessonSessionEndInput {
+  sessionId: string;
+  totalTimeSpent: number;
+  progress: number;
+  metadata?: Record<string, any>;
+}
+
+export interface LessonSession {
+  sessionId: string;
+  lessonId: string;
+  startedAt: string;
+  endedAt?: string;
+  totalTimeSpent?: number;
+  progress?: number;
+  sessionType: 'learning' | 'review' | 'quiz';
+  metadata?: Record<string, any>;
+}
+
+export interface LessonStateInput {
+  lessonId: string;
+  state: Record<string, any>;
+  metadata?: Record<string, any>;
+}
+
+export interface LessonState {
+  id: string;
+  lessonId: string;
+  state: Record<string, any>;
+  savedAt: string;
+}
+
+export interface ProgressAnalytics {
+  totalLessons: number;
+  completedLessons: number;
+  inProgressLessons: number;
+  averageScore: number;
+  totalTimeSpent: number;
+  averageTimePerLesson: number;
+  completionRate: number;
+  categoryBreakdown: CategoryProgress[];
+  weeklyProgress: WeeklyProgressDetail[];
+  monthlyProgress: MonthlyProgressDetail[];
+}
+
+export interface WeeklyProgressDetail {
+  weekStart: string;
+  lessonsCompleted: number;
+  timeSpent: number;
+  averageScore: number;
+}
+
+export interface MonthlyProgressDetail {
+  month: string;
+  lessonsCompleted: number;
+  timeSpent: number;
+  averageScore: number;
+}
+
+export interface UserLessonProgress {
+  id: string;
+  lessonId: string;
+  status: 'not_started' | 'in_progress' | 'completed' | 'paused';
+  progress: number;
+  sectionsCompleted: number;
+  totalSections: number;
+  timeSpent: number;
+  lastAccessedAt: string;
+  completedAt?: string;
+  score?: number;
+  attempts: number;
+  metadata?: Record<string, any>;
+  lesson: {
+    id: string;
+    title: string;
+    category: string;
+    difficulty: string;
+  };
+}
+
 // Tone and Interaction Types
 export interface ToneSettings {
   tone: 'friendly' | 'professional' | 'casual' | 'formal' | 'humorous';
@@ -682,4 +832,17 @@ export type {
   PaginatedResponse,
   SearchParams,
   SearchResult,
+  LessonProgress,
+  LessonProgressInput,
+  SectionCompletionInput,
+  SectionCompletion,
+  LessonSessionInput,
+  LessonSessionEndInput,
+  LessonSession,
+  LessonStateInput,
+  LessonState,
+  ProgressAnalytics,
+  WeeklyProgressDetail,
+  MonthlyProgressDetail,
+  UserLessonProgress,
 };

@@ -1,107 +1,234 @@
-import { useCallback } from 'react';
-import { useLocalStorage } from './useLocalStorage';
+import { useCallback, useState, useEffect } from 'react';
+import { useLazyQuery, useMutation as useApolloMutation } from '@apollo/client';
+import { useAuth } from './useAuth';
+import { 
+  GET_SPACED_REPETITION_ITEMS, 
+  GET_DUE_REVIEWS, 
+  UPDATE_SPACED_REPETITION, 
+  CREATE_SPACED_REPETITION_ITEM 
+} from '@/lib/graphql';
+import { handleError } from '@/utils/errorHandling';
+import type { 
+  SpacedRepetitionItem, 
+  SpacedRepetitionInput, 
+  CreateSpacedRepetitionInput,
+  DueReviewItem 
+} from '@/types/api';
 
-interface ReviewCard {
-  id: string;
-  difficulty: number; // 1-5
-  interval: number; // days
-  repetitions: number;
-  efactor: number; // ease factor
-  nextReview: Date;
-  lastReviewed?: Date;
+interface SpacedRepetitionState {
+  items: SpacedRepetitionItem[];
+  dueReviews: DueReviewItem[];
+  isLoading: boolean;
+  error: string | null;
+  isUpdating: boolean;
 }
 
-interface LessonReview {
-  lessonId: string;
-  quality: number; // 0-5 (0=complete blackout, 5=perfect response)
+interface SpacedRepetitionActions {
+  updateSpacedRepetition: (input: SpacedRepetitionInput) => Promise<void>;
+  getNextReview: (lessonId: string) => SpacedRepetitionItem | null;
+  getDueCards: () => DueReviewItem[];
+  getRecommendedLessons: () => DueReviewItem[];
+  refreshItems: () => Promise<void>;
 }
 
-export const useSpacedRepetition = () => {
-  const [cards, setCards] = useLocalStorage<ReviewCard[]>('review_cards', []);
+export type UseSpacedRepetitionReturn = SpacedRepetitionState & SpacedRepetitionActions;
 
-  const calculateNextReview = useCallback((card: ReviewCard, quality: number): ReviewCard => {
-    let { interval, repetitions, efactor } = card;
+export const useSpacedRepetition = (): UseSpacedRepetitionReturn => {
+  const { isAuthenticated, user } = useAuth();
+  const [items, setItems] = useState<SpacedRepetitionItem[]>([]);
+  const [dueReviews, setDueReviews] = useState<DueReviewItem[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [isUpdating, setIsUpdating] = useState(false);
 
-    if (quality >= 3) {
-      if (repetitions === 0) {
-        interval = 1;
-      } else if (repetitions === 1) {
-        interval = 6;
-      } else {
-        interval = Math.round(interval * efactor);
+  // GraphQL queries
+  const [getSpacedRepetitionItemsQuery, { 
+    data: itemsData, 
+    loading: isLoadingItems,
+    refetch: refetchItems 
+  }] = useLazyQuery(GET_SPACED_REPETITION_ITEMS, {
+    fetchPolicy: 'cache-and-network',
+    errorPolicy: 'all',
+  });
+
+  const [getDueReviewsQuery, { 
+    data: dueReviewsData, 
+    loading: isLoadingDueReviews,
+    refetch: refetchDueReviews 
+  }] = useLazyQuery(GET_DUE_REVIEWS, {
+    fetchPolicy: 'cache-and-network',
+    errorPolicy: 'all',
+  });
+
+  // GraphQL mutations
+  const [updateSpacedRepetitionMutation] = useApolloMutation(UPDATE_SPACED_REPETITION, {
+    onCompleted: async (data) => {
+      if (data.updateSpacedRepetition.success) {
+        // Refresh the items to get updated data
+        await refetchItems();
+        await refetchDueReviews();
+        setError(null);
       }
-      repetitions += 1;
-    } else {
-      repetitions = 0;
-      interval = 1;
+    },
+    onError: (error: any) => {
+      const errorMessage = error.message || 'Failed to update spaced repetition.';
+      setError(errorMessage);
+      handleError(error, { action: 'update-spaced-repetition' });
     }
+  });
 
-    efactor = efactor + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02));
-    if (efactor < 1.3) efactor = 1.3;
+  const [createSpacedRepetitionItemMutation] = useApolloMutation(CREATE_SPACED_REPETITION_ITEM, {
+    onCompleted: async (data) => {
+      if (data.createSpacedRepetitionItem.success) {
+        // Refresh the items to get the new item
+        await refetchItems();
+        await refetchDueReviews();
+        setError(null);
+      }
+    },
+    onError: (error: any) => {
+      const errorMessage = error.message || 'Failed to create spaced repetition item.';
+      setError(errorMessage);
+      handleError(error, { action: 'create-spaced-repetition-item' });
+    }
+  });
 
-    const nextReview = new Date();
-    nextReview.setDate(nextReview.getDate() + interval);
+  // Initialize queries when authenticated
+  const initializeQueries = useCallback(() => {
+    if (isAuthenticated) {
+      getSpacedRepetitionItemsQuery();
+      getDueReviewsQuery();
+    }
+  }, [isAuthenticated, getSpacedRepetitionItemsQuery, getDueReviewsQuery]);
 
-    return {
-      ...card,
-      interval,
-      repetitions,
-      efactor,
-      nextReview,
-      lastReviewed: new Date(),
-    };
+  // Auto-initialize queries
+  useEffect(() => {
+    initializeQueries();
+  }, [initializeQueries]);
+
+  // Update local state when data changes
+  useEffect(() => {
+    if (itemsData?.spacedRepetitionItems) {
+      setItems(itemsData.spacedRepetitionItems);
+    }
+  }, [itemsData]);
+
+  useEffect(() => {
+    if (dueReviewsData?.dueReviews) {
+      setDueReviews(dueReviewsData.dueReviews);
+    }
+  }, [dueReviewsData]);
+
+  // Update loading state
+  useEffect(() => {
+    setIsLoading(isLoadingItems || isLoadingDueReviews);
+  }, [isLoadingItems, isLoadingDueReviews]);
+
+  // Handle errors
+  const handleQueryError = useCallback((error: any) => {
+    const errorMessage = error.message || 'Failed to load spaced repetition data.';
+    setError(errorMessage);
+    
+    if (!errorMessage.includes('401') && !errorMessage.includes('Unauthorized')) {
+      handleError(error, { action: 'load-spaced-repetition' });
+    }
   }, []);
 
-  const reviewLesson = useCallback((lessonReview: LessonReview) => {
-    setCards(currentCards => {
-      const existingCardIndex = currentCards.findIndex(c => c.id === lessonReview.lessonId);
+  // Update spaced repetition for a lesson
+  const updateSpacedRepetition = useCallback(async (input: SpacedRepetitionInput) => {
+    if (!isAuthenticated) {
+      setError('User must be authenticated to update spaced repetition.');
+      return;
+    }
+
+    setIsUpdating(true);
+    setError(null);
+
+    try {
+      // Check if item exists
+      const existingItem = items.find(item => item.lessonId === input.lessonId);
       
-      if (existingCardIndex >= 0) {
-        const updatedCards = [...currentCards];
-        updatedCards[existingCardIndex] = calculateNextReview(
-          updatedCards[existingCardIndex],
-          lessonReview.quality
-        );
-        return updatedCards;
+      if (existingItem) {
+        // Update existing item
+        await updateSpacedRepetitionMutation({
+          variables: { input }
+        });
       } else {
-        // New card
-        const newCard: ReviewCard = {
-          id: lessonReview.lessonId,
-          difficulty: 1,
-          interval: 1,
-          repetitions: 0,
-          efactor: 2.5,
-          nextReview: new Date(),
+        // Create new item
+        const createInput: CreateSpacedRepetitionInput = {
+          lessonId: input.lessonId,
+          initialQuality: input.quality,
         };
-        return [...currentCards, calculateNextReview(newCard, lessonReview.quality)];
+        
+        await createSpacedRepetitionItemMutation({
+          variables: { input: createInput }
+        });
       }
-    });
-  }, [setCards, calculateNextReview]);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to update spaced repetition.';
+      setError(errorMessage);
+      handleError(error, { action: 'update-spaced-repetition' });
+    } finally {
+      setIsUpdating(false);
+    }
+  }, [isAuthenticated, items, updateSpacedRepetitionMutation, createSpacedRepetitionItemMutation]);
 
-  const getDueCards = useCallback(() => {
-    const now = new Date();
-    return cards.filter(card => new Date(card.nextReview) <= now);
-  }, [cards]);
+  // Get next review for a specific lesson
+  const getNextReview = useCallback((lessonId: string): SpacedRepetitionItem | null => {
+    return items.find(item => item.lessonId === lessonId) || null;
+  }, [items]);
 
-  const getRecommendedLessons = useCallback(() => {
-    const dueCards = getDueCards();
-    // Sort by priority (overdue first, then by efactor)
-    return dueCards.sort((a, b) => {
-      const aDaysOverdue = Math.max(0, (Date.now() - new Date(a.nextReview).getTime()) / (1000 * 60 * 60 * 24));
-      const bDaysOverdue = Math.max(0, (Date.now() - new Date(b.nextReview).getTime()) / (1000 * 60 * 60 * 24));
-      
-      if (aDaysOverdue !== bDaysOverdue) {
-        return bDaysOverdue - aDaysOverdue; // More overdue first
+  // Get all due cards
+  const getDueCards = useCallback((): DueReviewItem[] => {
+    return dueReviews;
+  }, [dueReviews]);
+
+  // Get recommended lessons (sorted by priority)
+  const getRecommendedLessons = useCallback((): DueReviewItem[] => {
+    return [...dueReviews].sort((a, b) => {
+      // Sort by priority (higher priority first)
+      if (a.priority !== b.priority) {
+        return b.priority - a.priority;
       }
       
-      return a.efactor - b.efactor; // Lower efactor (harder) first
+      // Then by days overdue (more overdue first)
+      if (a.daysOverdue !== b.daysOverdue) {
+        return b.daysOverdue - a.daysOverdue;
+      }
+      
+      // Finally by ease factor (lower = harder, so prioritize)
+      return a.easeFactor - b.easeFactor;
     });
-  }, [getDueCards]);
+  }, [dueReviews]);
+
+  // Refresh all data
+  const refreshItems = useCallback(async () => {
+    if (!isAuthenticated) return;
+    
+    try {
+      await Promise.all([
+        refetchItems(),
+        refetchDueReviews()
+      ]);
+      setError(null);
+    } catch (error) {
+      handleQueryError(error);
+    }
+  }, [isAuthenticated, refetchItems, refetchDueReviews, handleQueryError]);
 
   return {
-    cards,
-    reviewLesson,
+    // State
+    items,
+    dueReviews,
+    isLoading,
+    error,
+    isUpdating,
+    
+    // Actions
+    updateSpacedRepetition,
+    getNextReview,
     getDueCards,
     getRecommendedLessons,
+    refreshItems,
   };
 };
