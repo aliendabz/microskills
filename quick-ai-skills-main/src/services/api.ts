@@ -354,6 +354,31 @@ export class ApiClient {
     return this.get(API_ENDPOINTS.LLM.HEALTH);
   }
 
+  // Queue Services
+  async addToQueue(queueData: any): Promise<ApiResponse<any>> {
+    return this.post(API_ENDPOINTS.QUEUE.ADD, queueData);
+  }
+
+  async getQueueItem(itemId: string): Promise<ApiResponse<any>> {
+    return this.get(`${API_ENDPOINTS.QUEUE.ITEM}/${itemId}`);
+  }
+
+  async getUserQueueItems(userId: string): Promise<ApiResponse<any>> {
+    return this.get(`${API_ENDPOINTS.QUEUE.USER_ITEMS}/${userId}`);
+  }
+
+  async getQueueStats(): Promise<ApiResponse<any>> {
+    return this.get(API_ENDPOINTS.QUEUE.STATS);
+  }
+
+  async cancelQueueItem(itemId: string): Promise<ApiResponse<any>> {
+    return this.post(`${API_ENDPOINTS.QUEUE.CANCEL}/${itemId}`);
+  }
+
+  async retryQueueItem(itemId: string): Promise<ApiResponse<any>> {
+    return this.post(`${API_ENDPOINTS.QUEUE.RETRY}/${itemId}`);
+  }
+
   // Certificates
   async generateCertificate(trackId: string): Promise<ApiResponse<any>> {
     return this.post(API_ENDPOINTS.CERTIFICATES.GENERATE, { trackId });

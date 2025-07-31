@@ -37,7 +37,18 @@ export const ENV = {
   // Feature Flags
   ENABLE_ANALYTICS: import.meta.env.VITE_ENABLE_ANALYTICS === 'true',
   ENABLE_NOTIFICATIONS: import.meta.env.VITE_ENABLE_NOTIFICATIONS === 'true',
+  ENABLE_EMAIL_NOTIFICATIONS: import.meta.env.VITE_ENABLE_EMAIL_NOTIFICATIONS === 'true',
   ENABLE_DEBUG_MODE: import.meta.env.VITE_ENABLE_DEBUG_MODE === 'true',
+  
+  // Email Configuration
+  EMAIL_PROVIDER: import.meta.env.VITE_EMAIL_PROVIDER || 'mock',
+  EMAIL_API_KEY: import.meta.env.VITE_EMAIL_API_KEY || '',
+  EMAIL_FROM: import.meta.env.VITE_EMAIL_FROM || 'noreply@aiskills.com',
+  EMAIL_FROM_NAME: import.meta.env.VITE_EMAIL_FROM_NAME || 'AI Skills',
+  EMAIL_REPLY_TO: import.meta.env.VITE_EMAIL_REPLY_TO || '',
+  
+  // App Configuration
+  APP_URL: import.meta.env.VITE_APP_URL || 'http://localhost:3000',
   
   // App Configuration
   APP_NAME: import.meta.env.VITE_APP_NAME || 'AI Skills',

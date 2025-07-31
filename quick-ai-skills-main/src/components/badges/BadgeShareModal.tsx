@@ -5,17 +5,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Share2, Download, Copy, Trophy, Star, Award, ExternalLink } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-
-interface Certificate {
-  id: string;
-  title: string;
-  trackId: string;
-  trackName: string;
-  issuedAt: Date;
-  level: "bronze" | "silver" | "gold";
-  shareLink: string;
-  badgeImageUrl: string;
-}
+import { useCertificates } from "@/hooks/useCertificates";
+import { Certificate, BadgeShareRequest } from "@/types/api";
 
 interface BadgeShareModalProps {
   certificate: Certificate;
@@ -25,6 +16,7 @@ interface BadgeShareModalProps {
 export const BadgeShareModal = ({ certificate, trigger }: BadgeShareModalProps) => {
   const [isOpen, setIsOpen] = useState(false);
   const { toast } = useToast();
+  const { shareBadge, sharing, error } = useCertificates();
 
   const handleCopyLink = async () => {
     try {
@@ -42,25 +34,77 @@ export const BadgeShareModal = ({ certificate, trigger }: BadgeShareModalProps) 
     }
   };
 
-  const handleLinkedInShare = () => {
-    const linkedinUrl = `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(certificate.shareLink)}`;
-    window.open(linkedinUrl, '_blank', 'width=600,height=400');
-    
-    // Track analytics event
-    console.log('badge_share_click', { platform: 'linkedin', certificateId: certificate.id });
+  const handleLinkedInShare = async () => {
+    try {
+      const shareRequest: BadgeShareRequest = {
+        certificateId: certificate.id,
+        platform: 'linkedin',
+        message: `I just earned the ${certificate.title} certificate in ${certificate.trackName}! 🎉`,
+        shareLink: certificate.shareLink
+      };
+
+      await shareBadge(shareRequest);
+      
+      const linkedinUrl = `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(certificate.shareLink)}`;
+      window.open(linkedinUrl, '_blank', 'width=600,height=400');
+      
+      toast({
+        title: "Shared on LinkedIn!",
+        description: "Your achievement has been shared successfully",
+      });
+    } catch (error) {
+      toast({
+        title: "Share failed",
+        description: "Unable to share on LinkedIn. Please try again.",
+        variant: "destructive"
+      });
+    }
   };
 
-  const handleNotionShare = () => {
-    // In a real app, this would integrate with Notion API
-    const notionTemplate = `🏆 **${certificate.title}**\n\nI just earned this AI skills certificate!\n\n**Track:** ${certificate.trackName}\n**Level:** ${certificate.level.toUpperCase()}\n**Issued:** ${certificate.issuedAt.toLocaleDateString()}\n\nView certificate: ${certificate.shareLink}`;
-    
-    navigator.clipboard.writeText(notionTemplate);
-    toast({
-      title: "Notion template copied!",
-      description: "Paste this into your Notion page",
-    });
-    
-    console.log('badge_share_click', { platform: 'notion', certificateId: certificate.id });
+  const handleNotionShare = async () => {
+    try {
+      const shareRequest: BadgeShareRequest = {
+        certificateId: certificate.id,
+        platform: 'notion',
+        message: `🏆 **${certificate.title}**\n\nI just earned this AI skills certificate!\n\n**Track:** ${certificate.trackName}\n**Level:** ${certificate.level.toUpperCase()}\n**Issued:** ${certificate.issuedAt.toLocaleDateString()}\n\nView certificate: ${certificate.shareLink}`,
+        shareLink: certificate.shareLink
+      };
+
+      await shareBadge(shareRequest);
+      
+      // Copy Notion template to clipboard
+      const notionTemplate = `🏆 **${certificate.title}**\n\nI just earned this AI skills certificate!\n\n**Track:** ${certificate.trackName}\n**Level:** ${certificate.level.toUpperCase()}\n**Issued:** ${certificate.issuedAt.toLocaleDateString()}\n\nView certificate: ${certificate.shareLink}`;
+      
+      await navigator.clipboard.writeText(notionTemplate);
+      toast({
+        title: "Notion template copied!",
+        description: "Paste this into your Notion page",
+      });
+    } catch (error) {
+      toast({
+        title: "Share failed",
+        description: "Unable to share on Notion. Please try again.",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleDownloadCertificate = async () => {
+    try {
+      // This would integrate with the downloadCertificate method from useCertificates
+      // For now, we'll use the existing shareLink
+      window.open(certificate.shareLink, '_blank');
+      toast({
+        title: "Certificate opened!",
+        description: "Your certificate has been opened in a new tab",
+      });
+    } catch (error) {
+      toast({
+        title: "Download failed",
+        description: "Unable to download certificate. Please try again.",
+        variant: "destructive"
+      });
+    }
   };
 
   const getLevelIcon = (level: string) => {
@@ -117,6 +161,13 @@ export const BadgeShareModal = ({ certificate, trigger }: BadgeShareModalProps) 
             </CardContent>
           </Card>
 
+          {/* Error Display */}
+          {error && (
+            <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-md">
+              <p className="text-sm text-destructive">{error}</p>
+            </div>
+          )}
+
           {/* Share Options */}
           <div className="space-y-4">
             <h4 className="font-medium text-foreground">Share your achievement:</h4>
@@ -124,19 +175,21 @@ export const BadgeShareModal = ({ certificate, trigger }: BadgeShareModalProps) 
             <div className="grid grid-cols-2 gap-3">
               <Button 
                 onClick={handleLinkedInShare}
+                disabled={sharing}
                 className="bg-[#0077B5] hover:bg-[#0077B5]/90 text-white border-0"
               >
                 <ExternalLink className="w-4 h-4 mr-2" />
-                LinkedIn
+                {sharing ? "Sharing..." : "LinkedIn"}
               </Button>
               
               <Button 
                 onClick={handleNotionShare}
+                disabled={sharing}
                 variant="outline"
                 className="border-gray-300 hover:border-gray-400"
               >
                 <ExternalLink className="w-4 h-4 mr-2" />
-                Notion
+                {sharing ? "Sharing..." : "Notion"}
               </Button>
             </div>
 
@@ -150,14 +203,23 @@ export const BadgeShareModal = ({ certificate, trigger }: BadgeShareModalProps) 
                   readOnly
                   className="flex-1 px-3 py-2 text-sm border border-input bg-background rounded-md"
                 />
-                <Button variant="outline" size="sm" onClick={handleCopyLink}>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={handleCopyLink}
+                  aria-label="Copy certificate link"
+                >
                   <Copy className="w-4 h-4" />
                 </Button>
               </div>
             </div>
 
             {/* Download Option */}
-            <Button variant="outline" className="w-full">
+            <Button 
+              variant="outline" 
+              className="w-full"
+              onClick={handleDownloadCertificate}
+            >
               <Download className="w-4 h-4 mr-2" />
               Download Certificate
             </Button>

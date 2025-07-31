@@ -1,69 +1,141 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Slider } from "@/components/ui/slider";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Bell, Clock, Smartphone, Mail, MessageSquare } from "lucide-react";
+import { Bell, Clock, Smartphone, Mail, MessageSquare, Zap, Moon, Sun } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-
-interface NotificationPreferences {
-  dailyReminders: boolean;
-  streakReminders: boolean;
-  newLessons: boolean;
-  achievements: boolean;
-  weeklyProgress: boolean;
-  pushNotifications: boolean;
-  emailNotifications: boolean;
-  reminderTime: string;
-  reminderDays: string[];
-  frequency: string;
-}
+import { useNotifications } from "@/hooks/useNotifications";
+import type { NotificationPreferences as NotificationPrefs } from "@/services/notificationService";
 
 export const NotificationPreferences = () => {
-  const [preferences, setPreferences] = useState<NotificationPreferences>({
-    dailyReminders: true,
-    streakReminders: true,
-    newLessons: true,
-    achievements: true,
-    weeklyProgress: false,
-    pushNotifications: true,
-    emailNotifications: false,
-    reminderTime: "09:00",
-    reminderDays: ["mon", "tue", "wed", "thu", "fri"],
-    frequency: "daily"
-  });
-
+  const { 
+    isInitialized, 
+    isEnabled, 
+    permission, 
+    requestPermission, 
+    getPreferences, 
+    updatePreferences 
+  } = useNotifications();
+  
+  const [preferences, setPreferences] = useState<NotificationPrefs | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
 
-  const handleToggle = (key: keyof NotificationPreferences, value: boolean) => {
-    setPreferences(prev => ({ ...prev, [key]: value }));
+  // Load preferences on mount
+  useEffect(() => {
+    if (isInitialized) {
+      loadPreferences();
+    }
+  }, [isInitialized]);
+
+  const loadPreferences = async () => {
+    try {
+      const prefs = await getPreferences();
+      setPreferences(prefs);
+    } catch (error) {
+      console.error('Failed to load notification preferences:', error);
+      toast({
+        title: "Error loading preferences",
+        description: "Please refresh the page and try again.",
+        variant: "destructive"
+      });
+    }
   };
 
-  const handleTimeChange = (time: string) => {
-    setPreferences(prev => ({ ...prev, reminderTime: time }));
+  const handleToggle = async (key: keyof NotificationPrefs['types'] | keyof NotificationPrefs['channels'], value: boolean) => {
+    if (!preferences) return;
+
+    const updates: Partial<NotificationPrefs> = {};
+    
+    if (key in preferences.types) {
+      updates.types = { ...preferences.types, [key]: value };
+    } else if (key in preferences.channels) {
+      updates.channels = { ...preferences.channels, [key]: value };
+    }
+
+    try {
+      const updated = await updatePreferences(updates);
+      setPreferences(updated);
+      
+      toast({
+        title: "Preference updated",
+        description: `${key} notifications ${value ? 'enabled' : 'disabled'}.`,
+      });
+    } catch (error) {
+      console.error('Failed to update preference:', error);
+      toast({
+        title: "Error updating preference",
+        description: "Please try again.",
+        variant: "destructive"
+      });
+    }
   };
 
-  const handleDayToggle = (day: string) => {
-    setPreferences(prev => ({
-      ...prev,
-      reminderDays: prev.reminderDays.includes(day)
-        ? prev.reminderDays.filter(d => d !== day)
-        : [...prev.reminderDays, day]
-    }));
+  const handleQuietHoursToggle = async (enabled: boolean) => {
+    if (!preferences) return;
+
+    try {
+      const updated = await updatePreferences({
+        quietHours: { ...preferences.quietHours, enabled }
+      });
+      setPreferences(updated);
+      
+      toast({
+        title: "Quiet hours updated",
+        description: `Quiet hours ${enabled ? 'enabled' : 'disabled'}.`,
+      });
+    } catch (error) {
+      console.error('Failed to update quiet hours:', error);
+      toast({
+        title: "Error updating quiet hours",
+        description: "Please try again.",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleQuietHoursTimeChange = async (type: 'start' | 'end', time: string) => {
+    if (!preferences) return;
+
+    try {
+      const updated = await updatePreferences({
+        quietHours: { ...preferences.quietHours, [type]: time }
+      });
+      setPreferences(updated);
+    } catch (error) {
+      console.error('Failed to update quiet hours time:', error);
+    }
+  };
+
+  const handleFrequencyChange = async (frequency: NotificationPrefs['frequency']) => {
+    if (!preferences) return;
+
+    try {
+      const updated = await updatePreferences({ frequency });
+      setPreferences(updated);
+      
+      toast({
+        title: "Frequency updated",
+        description: `Notifications will be sent ${frequency}.`,
+      });
+    } catch (error) {
+      console.error('Failed to update frequency:', error);
+      toast({
+        title: "Error updating frequency",
+        description: "Please try again.",
+        variant: "destructive"
+      });
+    }
   };
 
   const handleSave = async () => {
     setIsLoading(true);
     
     try {
-      // Mock API call - in real app this would be GraphQL mutation
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      console.log('updateNotificationPrefs mutation:', preferences);
-      
+      // Preferences are saved automatically when updated
       toast({
         title: "Preferences saved!",
         description: "Your notification settings have been updated.",
@@ -80,229 +152,262 @@ export const NotificationPreferences = () => {
   };
 
   const requestNotificationPermission = async () => {
-    if ('Notification' in window) {
-      const permission = await Notification.requestPermission();
-      if (permission === 'granted') {
-        handleToggle('pushNotifications', true);
+    try {
+      const result = await requestPermission();
+      if (result === 'granted') {
         toast({
           title: "Notifications enabled!",
           description: "You'll receive learning reminders and updates.",
         });
+        await loadPreferences(); // Reload preferences
+      } else {
+        toast({
+          title: "Permission denied",
+          description: "You can enable notifications in your browser settings.",
+          variant: "destructive"
+        });
       }
+    } catch (error) {
+      toast({
+        title: "Error requesting permission",
+        description: "Please try again.",
+        variant: "destructive"
+      });
     }
   };
 
-  const days = [
-    { id: 'mon', label: 'Mon' },
-    { id: 'tue', label: 'Tue' },
-    { id: 'wed', label: 'Wed' },
-    { id: 'thu', label: 'Thu' },
-    { id: 'fri', label: 'Fri' },
-    { id: 'sat', label: 'Sat' },
-    { id: 'sun', label: 'Sun' }
-  ];
-
-  return (
-    <div className="max-w-2xl mx-auto p-6 space-y-6">
-      <div className="text-center space-y-2">
-        <h1 className="text-2xl font-bold text-foreground">Notification Preferences</h1>
-        <p className="text-muted-foreground">
-          Customize when and how you receive learning reminders
-        </p>
-      </div>
-
-      {/* Push Notification Setup */}
-      <Card className="shadow-card">
+  if (!preferences) {
+    return (
+      <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Smartphone className="w-5 h-5 text-primary" />
-            Push Notifications
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="font-medium text-foreground">Enable push notifications</p>
-              <p className="text-sm text-muted-foreground">Get reminders and updates on your device</p>
-            </div>
-            <Switch
-              checked={preferences.pushNotifications}
-              onCheckedChange={(checked) => {
-                if (checked) {
-                  requestNotificationPermission();
-                } else {
-                  handleToggle('pushNotifications', false);
-                }
-              }}
-            />
-          </div>
-          
-          {!preferences.pushNotifications && (
-            <div className="bg-muted/50 rounded-lg p-3">
-              <p className="text-sm text-muted-foreground">
-                Enable notifications to get the most out of your learning experience
-              </p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Notification Types */}
-      <Card className="shadow-card">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Bell className="w-5 h-5 text-primary" />
-            What to notify me about
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {[
-            {
-              key: 'dailyReminders' as keyof NotificationPreferences,
-              title: 'Daily learning reminders',
-              description: 'Get reminded to complete your daily lesson',
-              icon: Clock
-            },
-            {
-              key: 'streakReminders' as keyof NotificationPreferences,
-              title: 'Streak protection',
-              description: 'Alerts when your learning streak is at risk',
-              icon: Bell
-            },
-            {
-              key: 'newLessons' as keyof NotificationPreferences,
-              title: 'New lesson releases',
-              description: 'Notify when new content becomes available',
-              icon: MessageSquare
-            },
-            {
-              key: 'achievements' as keyof NotificationPreferences,
-              title: 'Achievements & badges',
-              description: 'Celebrate when you earn new achievements',
-              icon: Bell
-            },
-            {
-              key: 'weeklyProgress' as keyof NotificationPreferences,
-              title: 'Weekly progress summary',
-              description: 'Get a summary of your learning progress',
-              icon: Mail
-            }
-          ].map((item) => {
-            const Icon = item.icon;
-            return (
-              <div key={item.key} className="flex items-center justify-between p-3 rounded-lg border">
-                <div className="flex items-center gap-3">
-                  <Icon className="w-4 h-4 text-muted-foreground" />
-                  <div>
-                    <p className="font-medium text-foreground">{item.title}</p>
-                    <p className="text-sm text-muted-foreground">{item.description}</p>
-                  </div>
-                </div>
-                <Switch
-                  checked={preferences[item.key] as boolean}
-                  onCheckedChange={(checked) => handleToggle(item.key, checked)}
-                  disabled={!preferences.pushNotifications && !preferences.emailNotifications}
-                />
-              </div>
-            );
-          })}
-        </CardContent>
-      </Card>
-
-      {/* Timing Settings */}
-      {preferences.dailyReminders && (
-        <Card className="shadow-card">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Clock className="w-5 h-5 text-primary" />
-              Reminder Timing
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="space-y-3">
-              <label className="text-sm font-medium text-foreground">Reminder time</label>
-              <Select value={preferences.reminderTime} onValueChange={handleTimeChange}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {Array.from({ length: 24 }, (_, i) => {
-                    const hour = i.toString().padStart(2, '0');
-                    return (
-                      <SelectItem key={i} value={`${hour}:00`}>
-                        {hour}:00
-                      </SelectItem>
-                    );
-                  })}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-3">
-              <label className="text-sm font-medium text-foreground">Reminder days</label>
-              <div className="flex gap-2">
-                {days.map((day) => (
-                  <Button
-                    key={day.id}
-                    variant={preferences.reminderDays.includes(day.id) ? "default" : "outline"}
-                    size="sm"
-                    className={`h-10 w-12 ${
-                      preferences.reminderDays.includes(day.id)
-                        ? "bg-gradient-primary border-0 text-primary-foreground"
-                        : "hover:border-primary"
-                    }`}
-                    onClick={() => handleDayToggle(day.id)}
-                  >
-                    {day.label}
-                  </Button>
-                ))}
-              </div>
-            </div>
-
-            <div className="bg-muted/50 rounded-lg p-3">
-              <p className="text-sm text-muted-foreground">
-                You'll receive reminders at {preferences.reminderTime} on{' '}
-                {preferences.reminderDays.length === 7 ? 'every day' : 
-                 preferences.reminderDays.length === 0 ? 'no days' :
-                 preferences.reminderDays.map(d => days.find(day => day.id === d)?.label).join(', ')}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Email Notifications */}
-      <Card className="shadow-card">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Mail className="w-5 h-5 text-primary" />
-            Email Notifications
+            <Bell className="h-5 w-5" />
+            Notification Preferences
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="font-medium text-foreground">Email summaries</p>
-              <p className="text-sm text-muted-foreground">Receive weekly progress reports via email</p>
+          <div className="flex items-center justify-center py-8">
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+              <p className="text-muted-foreground">Loading preferences...</p>
             </div>
-            <Switch
-              checked={preferences.emailNotifications}
-              onCheckedChange={(checked) => handleToggle('emailNotifications', checked)}
-            />
           </div>
         </CardContent>
       </Card>
+    );
+  }
 
-      {/* Save Button */}
-      <div className="flex justify-center pt-4">
-        <Button 
-          onClick={handleSave} 
-          disabled={isLoading}
-          className="bg-gradient-primary border-0 text-primary-foreground hover:opacity-90 px-8"
-        >
-          {isLoading ? "Saving..." : "Save Preferences"}
-        </Button>
-      </div>
-    </div>
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Bell className="h-5 w-5" />
+          Notification Preferences
+        </CardTitle>
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Badge variant={isEnabled ? "default" : "secondary"}>
+            {isEnabled ? "Enabled" : "Disabled"}
+          </Badge>
+          <Badge variant={permission === 'granted' ? "default" : "destructive"}>
+            {permission === 'granted' ? "Permission Granted" : "Permission Required"}
+          </Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        {/* Permission Request */}
+        {permission !== 'granted' && (
+          <div className="p-4 border rounded-lg bg-muted/50">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="font-medium">Enable Push Notifications</h4>
+                <p className="text-sm text-muted-foreground">
+                  Get notified about lessons, achievements, and progress updates.
+                </p>
+              </div>
+              <Button onClick={requestNotificationPermission} size="sm">
+                Enable Notifications
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Notification Types */}
+        <div className="space-y-4">
+          <h3 className="text-lg font-medium">Notification Types</h3>
+          <div className="grid gap-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Zap className="h-4 w-4 text-yellow-500" />
+                <div>
+                  <p className="font-medium">Lesson Reminders</p>
+                  <p className="text-sm text-muted-foreground">Daily learning reminders</p>
+                </div>
+              </div>
+              <Switch
+                checked={preferences.types.lesson_reminder}
+                onCheckedChange={(checked) => handleToggle('lesson_reminder', checked)}
+              />
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Bell className="h-4 w-4 text-blue-500" />
+                <div>
+                  <p className="font-medium">Achievements</p>
+                  <p className="text-sm text-muted-foreground">When you unlock badges</p>
+                </div>
+              </div>
+              <Switch
+                checked={preferences.types.achievement_unlocked}
+                onCheckedChange={(checked) => handleToggle('achievement_unlocked', checked)}
+              />
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <MessageSquare className="h-4 w-4 text-green-500" />
+                <div>
+                  <p className="font-medium">Streak Alerts</p>
+                  <p className="text-sm text-muted-foreground">Learning streak updates</p>
+                </div>
+              </div>
+              <Switch
+                checked={preferences.types.streak_achieved}
+                onCheckedChange={(checked) => handleToggle('streak_achieved', checked)}
+              />
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Smartphone className="h-4 w-4 text-purple-500" />
+                <div>
+                  <p className="font-medium">Project Grading</p>
+                  <p className="text-sm text-muted-foreground">When projects are evaluated</p>
+                </div>
+              </div>
+              <Switch
+                checked={preferences.types.project_graded}
+                onCheckedChange={(checked) => handleToggle('project_graded', checked)}
+              />
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Bell className="h-4 w-4 text-orange-500" />
+                <div>
+                  <p className="font-medium">System Alerts</p>
+                  <p className="text-sm text-muted-foreground">Important app updates</p>
+                </div>
+              </div>
+              <Switch
+                checked={preferences.types.system_alert}
+                onCheckedChange={(checked) => handleToggle('system_alert', checked)}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Delivery Channels */}
+        <div className="space-y-4">
+          <h3 className="text-lg font-medium">Delivery Channels</h3>
+          <div className="grid gap-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Smartphone className="h-4 w-4" />
+                <div>
+                  <p className="font-medium">Push Notifications</p>
+                  <p className="text-sm text-muted-foreground">Browser notifications</p>
+                </div>
+              </div>
+              <Switch
+                checked={preferences.channels.push}
+                onCheckedChange={(checked) => handleToggle('push', checked)}
+                disabled={permission !== 'granted'}
+              />
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <MessageSquare className="h-4 w-4" />
+                <div>
+                  <p className="font-medium">In-App Notifications</p>
+                  <p className="text-sm text-muted-foreground">Notifications within the app</p>
+                </div>
+              </div>
+              <Switch
+                checked={preferences.channels.inApp}
+                onCheckedChange={(checked) => handleToggle('inApp', checked)}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Quiet Hours */}
+        <div className="space-y-4">
+          <h3 className="text-lg font-medium">Quiet Hours</h3>
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Moon className="h-4 w-4" />
+                <div>
+                  <p className="font-medium">Enable Quiet Hours</p>
+                  <p className="text-sm text-muted-foreground">Pause notifications during specific hours</p>
+                </div>
+              </div>
+              <Switch
+                checked={preferences.quietHours.enabled}
+                onCheckedChange={handleQuietHoursToggle}
+              />
+            </div>
+
+            {preferences.quietHours.enabled && (
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm font-medium">Start Time</label>
+                  <input
+                    type="time"
+                    value={preferences.quietHours.start}
+                    onChange={(e) => handleQuietHoursTimeChange('start', e.target.value)}
+                    className="mt-1 block w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">End Time</label>
+                  <input
+                    type="time"
+                    value={preferences.quietHours.end}
+                    onChange={(e) => handleQuietHoursTimeChange('end', e.target.value)}
+                    className="mt-1 block w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Frequency */}
+        <div className="space-y-4">
+          <h3 className="text-lg font-medium">Notification Frequency</h3>
+          <Select value={preferences.frequency} onValueChange={handleFrequencyChange}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="immediate">Immediate</SelectItem>
+              <SelectItem value="hourly">Hourly Digest</SelectItem>
+              <SelectItem value="daily">Daily Digest</SelectItem>
+              <SelectItem value="weekly">Weekly Digest</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Save Button */}
+        <div className="flex justify-end">
+          <Button onClick={handleSave} disabled={isLoading}>
+            {isLoading ? "Saving..." : "Save Preferences"}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 };

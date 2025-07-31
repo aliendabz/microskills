@@ -5,54 +5,280 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell } from "recharts";
-import { Users, BookOpen, Trophy, TrendingUp, Clock, Target } from "lucide-react";
+import { Users, BookOpen, Trophy, TrendingUp, Clock, Target, Bell, Mail, Activity } from "lucide-react";
+import { useAnalytics } from "@/hooks/useAnalytics";
+import { useNotifications } from "@/hooks/useNotifications";
+import { emailService } from "@/services/emailService";
 
-// Mock analytics data
-const mockAnalytics = {
+// Analytics data interface
+interface AnalyticsData {
   overview: {
-    totalUsers: 12847,
-    activeUsers: 8934,
-    lessonsCompleted: 45623,
-    avgCompletionRate: 87,
-    avgSessionTime: 6.2,
-    retentionRate: 73
+    totalUsers: number;
+    activeUsers: number;
+    lessonsCompleted: number;
+    avgCompletionRate: number;
+    avgSessionTime: number;
+    retentionRate: number;
+  };
+  userEngagement: Array<{
+    date: string;
+    users: number;
+    lessons: number;
+    retention: number;
+  }>;
+  topTracks: Array<{
+    name: string;
+    completions: number;
+    avgScore: number;
+  }>;
+  notificationStats: {
+    pushSent: number;
+    emailSent: number;
+    inAppSent: number;
+    openRate: number;
+    clickRate: number;
+  };
+  roiData: Array<{
+    metric: string;
+    value: string;
+    trend: number;
+  }>;
+}
+
+// Default analytics data
+const defaultAnalytics: AnalyticsData = {
+  overview: {
+    totalUsers: 0,
+    activeUsers: 0,
+    lessonsCompleted: 0,
+    avgCompletionRate: 0,
+    avgSessionTime: 0,
+    retentionRate: 0,
   },
-  userEngagement: [
-    { date: '2025-01-15', users: 1200, lessons: 3400, retention: 85 },
-    { date: '2025-01-16', users: 1350, lessons: 3800, retention: 82 },
-    { date: '2025-01-17', users: 1180, lessons: 3200, retention: 88 },
-    { date: '2025-01-18', users: 1420, lessons: 4100, retention: 79 },
-    { date: '2025-01-19', users: 1580, lessons: 4500, retention: 91 },
-    { date: '2025-01-20', users: 1650, lessons: 4800, retention: 86 }
-  ],
-  topTracks: [
-    { name: 'Prompt Engineering', completions: 8934, avgScore: 87 },
-    { name: 'AI Ethics', completions: 6721, avgScore: 92 },
-    { name: 'Machine Learning Basics', completions: 5432, avgScore: 83 },
-    { name: 'Neural Networks', completions: 3456, avgScore: 79 },
-    { name: 'Computer Vision', completions: 2341, avgScore: 88 }
-  ],
-  roiData: [
-    { metric: 'User Acquisition Cost', value: '$12.50', trend: -8 },
-    { metric: 'Lifetime Value', value: '$89.20', trend: 15 },
-    { metric: 'Monthly Churn', value: '4.2%', trend: -12 },
-    { metric: 'Revenue per User', value: '$34.80', trend: 23 }
-  ]
+  userEngagement: [],
+  topTracks: [],
+  notificationStats: {
+    pushSent: 0,
+    emailSent: 0,
+    inAppSent: 0,
+    openRate: 0,
+    clickRate: 0,
+  },
+  roiData: [],
 };
 
 export const AdminAnalytics = () => {
   const [timeRange, setTimeRange] = useState('7d');
-  const [data, setData] = useState(mockAnalytics);
+  const [data, setData] = useState<AnalyticsData>(defaultAnalytics);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  
+  const { getDebugData } = useAnalytics();
+  const { getStatus: getNotificationStatus } = useNotifications();
 
   useEffect(() => {
-    // In real app, fetch analytics data based on timeRange
-    console.log('Fetching analytics for:', timeRange);
+    fetchAnalyticsData();
   }, [timeRange]);
+
+  const fetchAnalyticsData = async () => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      // Get analytics service status
+      const analyticsStatus = getDebugData();
+      
+      // Get notification service status
+      const notificationStatus = getNotificationStatus();
+      
+      // Get email service status
+      const emailStatus = emailService.getStatus();
+
+      // Fetch analytics data from localStorage (in real app, this would be from PostHog API)
+      const analyticsEvents = JSON.parse(localStorage.getItem('analytics_events') || '[]');
+      const userData = JSON.parse(localStorage.getItem('analytics_user') || '{}');
+      
+      // Process analytics events to generate insights
+      const processedData = processAnalyticsEvents(analyticsEvents, timeRange);
+      
+      // Combine with service status data
+      const combinedData: AnalyticsData = {
+        ...processedData,
+        notificationStats: {
+          pushSent: notificationStatus.queueLength,
+          emailSent: emailStatus.queueLength,
+          inAppSent: analyticsEvents.filter((e: any) => e.event === 'notification_sent').length,
+          openRate: calculateOpenRate(analyticsEvents),
+          clickRate: calculateClickRate(analyticsEvents),
+        },
+        overview: {
+          ...processedData.overview,
+          totalUsers: analyticsStatus.isInitialized ? 1 : 0, // In real app, this would be from user database
+          activeUsers: analyticsStatus.isEnabled ? 1 : 0,
+        },
+      };
+
+      setData(combinedData);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch analytics data');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const processAnalyticsEvents = (events: any[], timeRange: string): Partial<AnalyticsData> => {
+    const now = new Date();
+    const timeRangeMs = getTimeRangeMs(timeRange);
+    const filteredEvents = events.filter((event: any) => {
+      const eventTime = new Date(event.timestamp || event.sentAt || 0);
+      return now.getTime() - eventTime.getTime() <= timeRangeMs;
+    });
+
+    // Calculate metrics from events
+    const lessonsCompleted = filteredEvents.filter((e: any) => e.event === 'lesson_completed').length;
+    const lessonsStarted = filteredEvents.filter((e: any) => e.event === 'lesson_started').length;
+    const achievementsUnlocked = filteredEvents.filter((e: any) => e.event === 'achievement_unlocked').length;
+    const projectsSubmitted = filteredEvents.filter((e: any) => e.event === 'project_submitted').length;
+
+    // Generate user engagement data
+    const userEngagement = generateUserEngagementData(timeRange, filteredEvents);
+
+    // Generate top tracks data
+    const topTracks = generateTopTracksData(filteredEvents);
+
+    return {
+      overview: {
+        totalUsers: 0, // Would come from user database
+        activeUsers: 0, // Would come from user database
+        lessonsCompleted,
+        avgCompletionRate: lessonsStarted > 0 ? Math.round((lessonsCompleted / lessonsStarted) * 100) : 0,
+        avgSessionTime: 6.2, // Would be calculated from session data
+        retentionRate: 73, // Would be calculated from user retention data
+      },
+      userEngagement,
+      topTracks,
+      roiData: [
+        { metric: 'User Acquisition Cost', value: '$12.50', trend: -8 },
+        { metric: 'Lifetime Value', value: '$89.20', trend: 15 },
+        { metric: 'Monthly Churn', value: '4.2%', trend: -12 },
+        { metric: 'Revenue per User', value: '$34.80', trend: 23 }
+      ],
+    };
+  };
+
+  const generateUserEngagementData = (timeRange: string, events: any[]) => {
+    const days = getDaysInRange(timeRange);
+    return days.map(date => {
+      const dayEvents = events.filter((e: any) => {
+        const eventDate = new Date(e.timestamp || e.sentAt || 0).toISOString().split('T')[0];
+        return eventDate === date;
+      });
+
+      return {
+        date,
+        users: dayEvents.filter((e: any) => e.event === 'user_signed_in').length,
+        lessons: dayEvents.filter((e: any) => e.event === 'lesson_completed').length,
+        retention: calculateRetention(dayEvents),
+      };
+    });
+  };
+
+  const generateTopTracksData = (events: any[]) => {
+    const trackCompletions: Record<string, { completions: number; scores: number[] }> = {};
+    
+    events.forEach((event: any) => {
+      if (event.event === 'lesson_completed' && event.properties?.lessonTitle) {
+        const track = event.properties.lessonTitle;
+        if (!trackCompletions[track]) {
+          trackCompletions[track] = { completions: 0, scores: [] };
+        }
+        trackCompletions[track].completions++;
+        if (event.properties.score) {
+          trackCompletions[track].scores.push(event.properties.score);
+        }
+      }
+    });
+
+    return Object.entries(trackCompletions)
+      .map(([name, data]) => ({
+        name,
+        completions: data.completions,
+        avgScore: data.scores.length > 0 
+          ? Math.round(data.scores.reduce((a, b) => a + b, 0) / data.scores.length)
+          : 0,
+      }))
+      .sort((a, b) => b.completions - a.completions)
+      .slice(0, 5);
+  };
+
+  const calculateOpenRate = (events: any[]) => {
+    const notificationsSent = events.filter((e: any) => e.event === 'notification_sent').length;
+    const notificationsOpened = events.filter((e: any) => e.event === 'notification_clicked').length;
+    return notificationsSent > 0 ? Math.round((notificationsOpened / notificationsSent) * 100) : 0;
+  };
+
+  const calculateClickRate = (events: any[]) => {
+    const notificationsSent = events.filter((e: any) => e.event === 'notification_sent').length;
+    const notificationsClicked = events.filter((e: any) => e.event === 'notification_action').length;
+    return notificationsSent > 0 ? Math.round((notificationsClicked / notificationsSent) * 100) : 0;
+  };
+
+  const calculateRetention = (events: any[]) => {
+    const uniqueUsers = new Set(events.map((e: any) => e.properties?.user_id || e.userId).filter(Boolean));
+    return uniqueUsers.size > 0 ? Math.round(Math.random() * 20 + 70) : 0; // Mock calculation
+  };
+
+  const getTimeRangeMs = (timeRange: string) => {
+    switch (timeRange) {
+      case '24h': return 24 * 60 * 60 * 1000;
+      case '7d': return 7 * 24 * 60 * 60 * 1000;
+      case '30d': return 30 * 24 * 60 * 60 * 1000;
+      case '90d': return 90 * 24 * 60 * 60 * 1000;
+      default: return 7 * 24 * 60 * 60 * 1000;
+    }
+  };
+
+  const getDaysInRange = (timeRange: string) => {
+    const days = timeRange === '24h' ? 1 : timeRange === '7d' ? 7 : timeRange === '30d' ? 30 : 90;
+    const result = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const date = new Date();
+      date.setDate(date.getDate() - i);
+      result.push(date.toISOString().split('T')[0]);
+    }
+    return result;
+  };
 
   const pieChartData = [
     { name: 'Completed', value: data.overview.avgCompletionRate, color: 'hsl(var(--success))' },
     { name: 'In Progress', value: 100 - data.overview.avgCompletionRate, color: 'hsl(var(--muted))' }
   ];
+
+  if (isLoading) {
+    return (
+      <div className="p-6 space-y-6">
+        <div className="flex items-center justify-center py-12">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+            <p className="text-muted-foreground">Loading analytics data...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-6 space-y-6">
+        <div className="flex items-center justify-center py-12">
+          <div className="text-center">
+            <p className="text-destructive mb-4">{error}</p>
+            <Button onClick={fetchAnalyticsData}>Retry</Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 space-y-6">
@@ -104,30 +330,12 @@ export const AdminAnalytics = () => {
                 <p className="text-sm font-medium text-muted-foreground">Lessons Completed</p>
                 <p className="text-2xl font-bold text-foreground">{data.overview.lessonsCompleted.toLocaleString()}</p>
               </div>
-              <BookOpen className="w-8 h-8 text-success" />
+              <BookOpen className="w-8 h-8 text-primary" />
             </div>
             <div className="mt-2">
               <Badge variant="secondary" className="text-xs">
                 <TrendingUp className="w-3 h-3 mr-1" />
                 +8% vs last week
-              </Badge>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="shadow-card hover:shadow-glow transition-smooth">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Avg Session Time</p>
-                <p className="text-2xl font-bold text-foreground">{data.overview.avgSessionTime}m</p>
-              </div>
-              <Clock className="w-8 h-8 text-streak-flame" />
-            </div>
-            <div className="mt-2">
-              <Badge variant="secondary" className="text-xs">
-                <TrendingUp className="w-3 h-3 mr-1" />
-                +3% vs last week
               </Badge>
             </div>
           </CardContent>
@@ -147,159 +355,176 @@ export const AdminAnalytics = () => {
             </div>
           </CardContent>
         </Card>
+
+        <Card className="shadow-card hover:shadow-glow transition-smooth">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Retention Rate</p>
+                <p className="text-2xl font-bold text-foreground">{data.overview.retentionRate}%</p>
+              </div>
+              <Trophy className="w-8 h-8 text-primary" />
+            </div>
+            <div className="mt-2">
+              <Badge variant="secondary" className="text-xs">
+                <TrendingUp className="w-3 h-3 mr-1" />
+                +5% vs last week
+              </Badge>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
+      {/* Notification Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Bell className="w-5 h-5" />
+              Push Notifications
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              <div className="flex justify-between">
+                <span>Sent</span>
+                <span className="font-medium">{data.notificationStats.pushSent}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Open Rate</span>
+                <span className="font-medium">{data.notificationStats.openRate}%</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Click Rate</span>
+                <span className="font-medium">{data.notificationStats.clickRate}%</span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Mail className="w-5 h-5" />
+              Email Notifications
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              <div className="flex justify-between">
+                <span>Sent</span>
+                <span className="font-medium">{data.notificationStats.emailSent}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Open Rate</span>
+                <span className="font-medium">{data.notificationStats.openRate}%</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Click Rate</span>
+                <span className="font-medium">{data.notificationStats.clickRate}%</span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Activity className="w-5 h-5" />
+              In-App Notifications
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              <div className="flex justify-between">
+                <span>Sent</span>
+                <span className="font-medium">{data.notificationStats.inAppSent}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Open Rate</span>
+                <span className="font-medium">{data.notificationStats.openRate}%</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Click Rate</span>
+                <span className="font-medium">{data.notificationStats.clickRate}%</span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Charts */}
       <Tabs defaultValue="engagement" className="space-y-4">
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList>
           <TabsTrigger value="engagement">User Engagement</TabsTrigger>
-          <TabsTrigger value="tracks">Track Performance</TabsTrigger>
-          <TabsTrigger value="roi">ROI Dashboard</TabsTrigger>
-          <TabsTrigger value="funnel">Conversion Funnel</TabsTrigger>
+          <TabsTrigger value="tracks">Top Tracks</TabsTrigger>
+          <TabsTrigger value="completion">Completion Rate</TabsTrigger>
         </TabsList>
 
         <TabsContent value="engagement" className="space-y-4">
-          <div className="grid lg:grid-cols-2 gap-6">
-            <Card className="shadow-card">
-              <CardHeader>
-                <CardTitle>Daily Active Users</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={300}>
-                  <LineChart data={data.userEngagement}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--muted))" />
-                    <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" />
-                    <YAxis stroke="hsl(var(--muted-foreground))" />
-                    <Tooltip 
-                      contentStyle={{ 
-                        backgroundColor: 'hsl(var(--card))', 
-                        border: '1px solid hsl(var(--border))',
-                        borderRadius: '8px'
-                      }} 
-                    />
-                    <Line 
-                      type="monotone" 
-                      dataKey="users" 
-                      stroke="hsl(var(--primary))" 
-                      strokeWidth={3}
-                      dot={{ fill: 'hsl(var(--primary))' }}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </CardContent>
-            </Card>
-
-            <Card className="shadow-card">
-              <CardHeader>
-                <CardTitle>Lesson Completion Rate</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={300}>
-                  <PieChart>
-                    <Pie
-                      data={pieChartData}
-                      cx="50%"
-                      cy="50%"
-                      outerRadius={100}
-                      dataKey="value"
-                    >
-                      {pieChartData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip />
-                  </PieChart>
-                </ResponsiveContainer>
-                <div className="flex justify-center gap-4 mt-4">
-                  {pieChartData.map((entry, index) => (
-                    <div key={index} className="flex items-center gap-2">
-                      <div 
-                        className="w-3 h-3 rounded-full" 
-                        style={{ backgroundColor: entry.color }}
-                      />
-                      <span className="text-sm text-muted-foreground">
-                        {entry.name}: {entry.value}%
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
+          <Card>
+            <CardHeader>
+              <CardTitle>User Engagement Over Time</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart data={data.userEngagement}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="date" />
+                  <YAxis />
+                  <Tooltip />
+                  <Line type="monotone" dataKey="users" stroke="#3B82F6" strokeWidth={2} />
+                  <Line type="monotone" dataKey="lessons" stroke="#10B981" strokeWidth={2} />
+                </LineChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="tracks" className="space-y-4">
-          <Card className="shadow-card">
+          <Card>
             <CardHeader>
-              <CardTitle>Top Performing Tracks</CardTitle>
+              <CardTitle>Top Learning Tracks</CardTitle>
             </CardHeader>
             <CardContent>
-              <ResponsiveContainer width="100%" height={400}>
+              <ResponsiveContainer width="100%" height={300}>
                 <BarChart data={data.topTracks}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--muted))" />
-                  <XAxis dataKey="name" stroke="hsl(var(--muted-foreground))" />
-                  <YAxis stroke="hsl(var(--muted-foreground))" />
-                  <Tooltip 
-                    contentStyle={{ 
-                      backgroundColor: 'hsl(var(--card))', 
-                      border: '1px solid hsl(var(--border))',
-                      borderRadius: '8px'
-                    }} 
-                  />
-                  <Bar dataKey="completions" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="name" />
+                  <YAxis />
+                  <Tooltip />
+                  <Bar dataKey="completions" fill="#3B82F6" />
                 </BarChart>
               </ResponsiveContainer>
             </CardContent>
           </Card>
         </TabsContent>
 
-        <TabsContent value="roi" className="space-y-4">
-          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
-            {data.roiData.map((metric, index) => (
-              <Card key={index} className="shadow-card">
-                <CardContent className="p-6">
-                  <div className="text-center space-y-2">
-                    <p className="text-sm font-medium text-muted-foreground">{metric.metric}</p>
-                    <p className="text-2xl font-bold text-foreground">{metric.value}</p>
-                    <Badge 
-                      variant={metric.trend > 0 ? "default" : "secondary"}
-                      className={metric.trend > 0 ? "bg-success text-success-foreground" : ""}
-                    >
-                      {metric.trend > 0 ? '+' : ''}{metric.trend}%
-                    </Badge>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </TabsContent>
-
-        <TabsContent value="funnel" className="space-y-4">
-          <Card className="shadow-card">
+        <TabsContent value="completion" className="space-y-4">
+          <Card>
             <CardHeader>
-              <CardTitle>User Conversion Funnel</CardTitle>
+              <CardTitle>Lesson Completion Rate</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
-                {[
-                  { stage: 'Landing Page Visits', users: 25000, rate: 100 },
-                  { stage: 'Sign Up Started', users: 15000, rate: 60 },
-                  { stage: 'Onboarding Completed', users: 12000, rate: 80 },
-                  { stage: 'First Lesson Started', users: 10000, rate: 83 },
-                  { stage: 'First Lesson Completed', users: 8500, rate: 85 },
-                  { stage: 'Badge Shared', users: 3400, rate: 40 }
-                ].map((stage, index) => (
-                  <div key={index} className="space-y-2">
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm font-medium text-foreground">{stage.stage}</span>
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm text-muted-foreground">{stage.users.toLocaleString()}</span>
-                        <Badge variant="secondary">{stage.rate}%</Badge>
-                      </div>
-                    </div>
-                    <Progress value={stage.rate} className="h-2" />
-                  </div>
-                ))}
-              </div>
+              <ResponsiveContainer width="100%" height={300}>
+                <PieChart>
+                  <Pie
+                    data={pieChartData}
+                    cx="50%"
+                    cy="50%"
+                    labelLine={false}
+                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                    outerRadius={80}
+                    fill="#8884d8"
+                    dataKey="value"
+                  >
+                    {pieChartData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip />
+                </PieChart>
+              </ResponsiveContainer>
             </CardContent>
           </Card>
         </TabsContent>
