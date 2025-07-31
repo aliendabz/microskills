@@ -342,7 +342,7 @@ export const MiniProjectSandbox = ({
     }
   };
 
-  const downloadProjectFiles = async () => {
+  const handleDownloadProjectFiles = async () => {
     try {
       const files = await downloadProjectFiles(projectId);
       toast({
@@ -478,7 +478,7 @@ export const MiniProjectSandbox = ({
                   <Save className="w-4 h-4 mr-1" />
                   Save
                 </Button>
-                <Button variant="ghost" size="sm" onClick={downloadProjectFiles}>
+                <Button variant="ghost" size="sm" onClick={handleDownloadProjectFiles}>
                   <Download className="w-4 h-4 mr-1" />
                   Download
                 </Button>

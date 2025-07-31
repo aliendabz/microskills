@@ -12,7 +12,13 @@ import { StreakCounter } from "@/components/progress/StreakCounter";
 import { XPProgressBar } from "@/components/progress/XPProgressBar";
 import { Leaderboard } from '@/components/leaderboard/Leaderboard';
 import { AchievementToast, useAchievements } from '@/components/achievements/AchievementToast';
-import { ErrorBoundary } from '@/components/ui/error-boundary';
+import { 
+  ErrorBoundary, 
+  RouteErrorBoundary, 
+  ComponentErrorBoundary,
+  LessonErrorBoundary,
+  ProjectErrorBoundary 
+} from '@/components/ui/error-boundary';
 import { Settings as SettingsPage } from "@/pages/Settings";
 import { Play, BookOpen, Trophy, Target, Clock, Sparkles, Settings, Code, BarChart, Users } from "lucide-react";
 import { useAnalytics, ANALYTICS_EVENTS } from '@/hooks/useAnalytics';
@@ -103,7 +109,7 @@ const Index = () => {
 
   if (showLeaderboard) {
     return (
-      <ErrorBoundary>
+      <RouteErrorBoundary>
         <div className="min-h-screen bg-gradient-hero">
           <header className="border-b bg-background/80 backdrop-blur-sm">
             <div className="max-w-6xl mx-auto px-4 py-4">
@@ -119,25 +125,27 @@ const Index = () => {
             <Leaderboard entries={leaderboardData} currentUserId="current" />
           </div>
         </div>
-      </ErrorBoundary>
+      </RouteErrorBoundary>
     );
   }
 
   if (isInLesson) {
     return (
-      <LessonChatScreen
-        lessonId="prompt-engineering-101"
-        lessonTitle="Prompt Engineering Fundamentals"
-        stepNumber={1}
-        totalSteps={5}
-        onComplete={handleLessonComplete}
-        onBack={handleBackFromLesson}
-      />
+      <LessonErrorBoundary>
+        <LessonChatScreen
+          lessonId="prompt-engineering-101"
+          lessonTitle="Prompt Engineering Fundamentals"
+          stepNumber={1}
+          totalSteps={5}
+          onComplete={handleLessonComplete}
+          onBack={handleBackFromLesson}
+        />
+      </LessonErrorBoundary>
     );
   }
 
   return (
-    <ErrorBoundary>
+    <RouteErrorBoundary>
       <div className="min-h-screen bg-gradient-hero">
         {/* Achievement Toasts */}
         {achievements.map((achievement) => (
@@ -308,7 +316,7 @@ const Index = () => {
         </Card>
       </div>
       </div>
-    </ErrorBoundary>
+    </RouteErrorBoundary>
   );
 };
 
