@@ -337,6 +337,23 @@ export class ApiClient {
     return this.get(API_ENDPOINTS.PROJECTS.HISTORY);
   }
 
+  // LLM Services
+  async evaluateCode(evaluationData: any): Promise<ApiResponse<any>> {
+    return this.post(API_ENDPOINTS.LLM.EVALUATE, evaluationData);
+  }
+
+  async analyzeCode(analysisData: any): Promise<ApiResponse<any>> {
+    return this.post(API_ENDPOINTS.LLM.ANALYZE, analysisData);
+  }
+
+  async generateFeedback(feedbackData: any): Promise<ApiResponse<any>> {
+    return this.post(API_ENDPOINTS.LLM.FEEDBACK, feedbackData);
+  }
+
+  async checkLLMHealth(): Promise<ApiResponse<any>> {
+    return this.get(API_ENDPOINTS.LLM.HEALTH);
+  }
+
   // Certificates
   async generateCertificate(trackId: string): Promise<ApiResponse<any>> {
     return this.post(API_ENDPOINTS.CERTIFICATES.GENERATE, { trackId });

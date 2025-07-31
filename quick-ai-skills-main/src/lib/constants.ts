@@ -26,6 +26,14 @@ export const ENV = {
     appId: import.meta.env.VITE_FIREBASE_APP_ID || '',
   },
   
+  // LLM Configuration
+  LLM_PROVIDER: import.meta.env.VITE_LLM_PROVIDER || 'openai',
+  LLM_API_KEY: import.meta.env.VITE_LLM_API_KEY || '',
+  LLM_MODEL: import.meta.env.VITE_LLM_MODEL || 'gpt-4',
+  LLM_BASE_URL: import.meta.env.VITE_LLM_BASE_URL || '',
+  LLM_TIMEOUT: parseInt(import.meta.env.VITE_LLM_TIMEOUT || '30000'),
+  LLM_MAX_RETRIES: parseInt(import.meta.env.VITE_LLM_MAX_RETRIES || '3'),
+  
   // Feature Flags
   ENABLE_ANALYTICS: import.meta.env.VITE_ENABLE_ANALYTICS === 'true',
   ENABLE_NOTIFICATIONS: import.meta.env.VITE_ENABLE_NOTIFICATIONS === 'true',
@@ -72,6 +80,13 @@ export const API_ENDPOINTS = {
     SUBMIT: `${ENV.API_BASE_URL}/projects/submit`,
     STATUS: `${ENV.API_BASE_URL}/projects/status`,
     HISTORY: `${ENV.API_BASE_URL}/projects/history`,
+  },
+  
+  LLM: {
+    EVALUATE: `${ENV.API_BASE_URL}/llm/evaluate`,
+    ANALYZE: `${ENV.API_BASE_URL}/llm/analyze`,
+    FEEDBACK: `${ENV.API_BASE_URL}/llm/feedback`,
+    HEALTH: `${ENV.API_BASE_URL}/llm/health`,
   },
   
   CERTIFICATES: {

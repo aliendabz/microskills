@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from './useAuth';
 import { apolloClient, SUBMIT_PROJECT, GET_PROJECT_STATUS, GET_PROJECT_HISTORY } from '@/lib/graphql';
 import { handleError } from '@/utils/errorHandling';
+import { llmService, type CodeEvaluationRequest, type CodeEvaluationResponse } from '@/services/llmService';
 import type { 
   Project, 
   ProjectSubmission, 
@@ -26,6 +27,7 @@ export interface ProjectActions {
   getProjectStatus: (projectId: string) => Promise<ProjectResult>;
   getProjectHistory: () => Promise<ProjectResult[]>;
   resubmitProject: (projectId: string, submission: ProjectSubmission) => Promise<ProjectResult>;
+  evaluateCode: (request: CodeEvaluationRequest) => Promise<CodeEvaluationResponse>;
   downloadProjectFiles: (projectId: string) => Promise<ProjectFile[]>;
   clearError: () => void;
 }
@@ -251,6 +253,33 @@ export function useProjects(): UseProjectsReturn {
     }
   });
 
+  // LLM Code Evaluation mutation
+  const evaluateCodeMutation = useMutation({
+    mutationFn: async (request: CodeEvaluationRequest): Promise<CodeEvaluationResponse> => {
+      return llmService.evaluateCode(request);
+    },
+    onSuccess: (evaluation) => {
+      // Track evaluation event
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('llm:evaluation-completed', { 
+          detail: { 
+            projectId: evaluation.projectId,
+            score: evaluation.score,
+            passed: evaluation.passed,
+            processingTime: evaluation.processingTime,
+            model: evaluation.model,
+            provider: evaluation.provider
+          } 
+        }));
+      }
+    },
+    onError: (error: any) => {
+      const errorMessage = error.message || 'Failed to evaluate code. Please try again.';
+      setError(errorMessage);
+      handleError(error, { action: 'llm-evaluate-code' });
+    }
+  });
+
   // Download project files mutation
   const downloadProjectFilesMutation = useMutation({
     mutationFn: async (projectId: string): Promise<ProjectFile[]> => {
@@ -313,6 +342,10 @@ export function useProjects(): UseProjectsReturn {
     return resubmitProjectMutation.mutateAsync({ projectId, submission });
   }, [resubmitProjectMutation]);
 
+  const evaluateCode = useCallback(async (request: CodeEvaluationRequest): Promise<CodeEvaluationResponse> => {
+    return evaluateCodeMutation.mutateAsync(request);
+  }, [evaluateCodeMutation]);
+
   const downloadProjectFiles = useCallback(async (projectId: string): Promise<ProjectFile[]> => {
     return downloadProjectFilesMutation.mutateAsync(projectId);
   }, [downloadProjectFilesMutation]);
@@ -338,6 +371,7 @@ export function useProjects(): UseProjectsReturn {
     getProjectStatus,
     getProjectHistory,
     resubmitProject,
+    evaluateCode,
     downloadProjectFiles,
     clearError,
   };
